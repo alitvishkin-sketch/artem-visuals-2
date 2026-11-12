@@ -3,7 +3,6 @@ package com.artem.visuals.effects;
 import com.artem.visuals.config.ArtemConfig;
 import com.artem.visuals.gui.NeonButton;
 import com.artem.visuals.hud.HudManager;
-import com.mojang.blaze3d.systems.RenderSystem;
 import net.fabricmc.fabric.api.client.rendering.v1.WorldRenderContext;
 import net.fabricmc.fabric.api.client.rendering.v1.WorldRenderEvents;
 import net.fabricmc.fabric.api.event.player.AttackEntityCallback;
@@ -12,17 +11,10 @@ import net.minecraft.block.BlockState;
 import net.minecraft.block.LeavesBlock;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.DrawContext;
-import net.minecraft.client.render.BufferBuilder;
-import net.minecraft.client.render.BufferRenderer;
-import net.minecraft.client.render.BuiltBuffer;
 import net.minecraft.client.render.Camera;
-import net.minecraft.client.render.GameRenderer;
 import net.minecraft.client.render.RenderLayer;
-import net.minecraft.client.render.Tessellator;
 import net.minecraft.client.render.VertexConsumer;
 import net.minecraft.client.render.VertexConsumerProvider;
-import net.minecraft.client.render.VertexFormat;
-import net.minecraft.client.render.VertexFormats;
 import net.minecraft.client.render.WorldRenderer;
 import net.minecraft.client.util.math.MatrixStack;
 import net.minecraft.entity.Entity;
@@ -45,7 +37,6 @@ import net.minecraft.util.math.Box;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.util.shape.VoxelShape;
 import net.minecraft.world.RaycastContext;
-import org.joml.Matrix4f;
 import org.lwjgl.glfw.GLFW;
 
 import java.util.*;
@@ -57,7 +48,7 @@ public final class EffectManager {
     private static final Map<Integer, LinkedList<Vec3d>> PROJECTILE_TRAILS = new HashMap<>();
     private static final List<DamagePopup> DAMAGE_POPUPS = new ArrayList<>();
     private static final Map<Integer, Float> LAST_HEALTH_MAP = new HashMap<>();
-    private static final Map<Integer, TrackedPearl> ACTIVE_PEARLS = new LinkedHashMap<>();
+    private static final Map<Integer, TrackedPearl> TRACKED_PEARLS = new LinkedHashMap<>();
 
     private static boolean wasOnGround = true;
     private static boolean wasDead = false;
@@ -71,31 +62,49 @@ public final class EffectManager {
     private record DamagePopup(double x, double y, double z, float amount, long createdMs) {}
     private record PearlPrediction(Vec3d landingPos, int ticksRemaining, List<Vec3d> path) {}
 
-    public record PearlHudInfo(int entityId, float remainingSeconds, float progress, double distance, boolean own) {}
+    public static final class TrackedPearl {
+        public final int id;
+        public final String ownerName;
+        public final boolean isSelf;
+        public Vec3d currentPos;
+        public Vec3d landingPos;
+        public long totalFlightMs;
+        public long etaMs;
+        public boolean entityVisible;
+        public List<Vec3d> path;
 
-    private static final class TrackedPearl {
-        final int id;
-        final boolean own;
-        Vec3d currentPos;
-        Vec3d landingPos;
-        List<Vec3d> path;
-        long createdMs;
-        long landingTimeMs;
-        boolean entityGone;
-
-        TrackedPearl(int id, boolean own, Vec3d currentPos, Vec3d landingPos, List<Vec3d> path, long now, long landingTimeMs) {
+        TrackedPearl(int id, String ownerName, boolean isSelf, Vec3d currentPos, Vec3d landingPos, long totalFlightMs, long etaMs, List<Vec3d> path) {
             this.id = id;
-            this.own = own;
+            this.ownerName = ownerName;
+            this.isSelf = isSelf;
             this.currentPos = currentPos;
             this.landingPos = landingPos;
+            this.totalFlightMs = Math.max(100L, totalFlightMs);
+            this.etaMs = etaMs;
+            this.entityVisible = true;
             this.path = path;
-            this.createdMs = now;
-            this.landingTimeMs = landingTimeMs;
-            this.entityGone = false;
+        }
+
+        public float remainingSeconds(long now) {
+            return Math.max(0L, etaMs - now) / 1000.0f;
+        }
+
+        public float progress(long now) {
+            long rem = Math.max(0L, etaMs - now);
+            return Math.max(0f, Math.min(1f, rem / (float) totalFlightMs));
         }
     }
 
     private EffectManager() {}
+
+    public static List<TrackedPearl> getActivePearls() {
+        long now = System.currentTimeMillis();
+        List<TrackedPearl> out = new ArrayList<>();
+        for (TrackedPearl tp : TRACKED_PEARLS.values()) {
+            if (tp.etaMs > now) out.add(tp);
+        }
+        return out;
+    }
 
     public static void registerEvents() {
         WorldRenderEvents.AFTER_TRANSLUCENT.register(EffectManager::onWorldRender);
@@ -144,21 +153,6 @@ public final class EffectManager {
         });
     }
 
-    public static List<PearlHudInfo> getActivePearls(MinecraftClient mc) {
-        List<PearlHudInfo> result = new ArrayList<>();
-        if (mc == null || mc.player == null || ACTIVE_PEARLS.isEmpty()) return result;
-        long now = System.currentTimeMillis();
-        for (TrackedPearl tp : ACTIVE_PEARLS.values()) {
-            long remMs = Math.max(0L, tp.landingTimeMs - now);
-            float sec = remMs / 1000.0f;
-            long totalMs = Math.max(250L, tp.landingTimeMs - tp.createdMs);
-            float prog = Math.max(0f, Math.min(1f, remMs / (float) totalMs));
-            double dist = Math.sqrt(mc.player.squaredDistanceTo(tp.landingPos));
-            result.add(new PearlHudInfo(tp.id, sec, prog, dist, tp.own));
-        }
-        return result;
-    }
-
     public static void triggerAhSearchForHand(MinecraftClient client) {
         if (client == null || client.player == null || client.getNetworkHandler() == null) return;
         ItemStack held = client.player.getMainHandStack();
@@ -181,7 +175,7 @@ public final class EffectManager {
             PROJECTILE_TRAILS.clear();
             DAMAGE_POPUPS.clear();
             LAST_HEALTH_MAP.clear();
-            ACTIVE_PEARLS.clear();
+            TRACKED_PEARLS.clear();
             helperAlertText = null;
             return;
         }
@@ -189,53 +183,37 @@ public final class EffectManager {
         ArtemConfig c = ArtemConfig.get();
         long now = System.currentTimeMillis();
 
-        // Обновление и сохранение траектории эндер-жемчуга (работает даже когда перл улетает за прорисовку)
-        if (c.pearlTimer || c.pearlTrajectory || c.showPearlHud) {
-            Set<Integer> seenInWorld = new HashSet<>();
+        // Трекер эндер-жемчуга (продолжает отсчёт даже если жемчуг улетел за прорисовку)
+        for (TrackedPearl tp : TRACKED_PEARLS.values()) {
+            tp.entityVisible = false;
+        }
+        if (c.pearlTimer || c.showPearlHud || c.pearlTrajectory) {
             for (Entity e : client.world.getEntities()) {
                 if (!(e instanceof EnderPearlEntity pearl) || pearl.isOnGround()) continue;
-                seenInWorld.add(pearl.getId());
-
                 PearlPrediction pred = simulateEnderPearl(client, pearl);
-                if (pred != null) {
-                    long estLanding = now + pred.ticksRemaining * 50L;
-                    boolean own = pearl.getOwner() == client.player || pearl.squaredDistanceTo(client.player) < 9.0;
-                    TrackedPearl existing = ACTIVE_PEARLS.get(pearl.getId());
-                    if (existing == null) {
-                        ACTIVE_PEARLS.put(pearl.getId(), new TrackedPearl(
-                                pearl.getId(), own, pearl.getPos(), pred.landingPos, pred.path, now, estLanding
-                        ));
-                    } else {
-                        existing.currentPos = pearl.getPos();
-                        existing.landingPos = pred.landingPos;
-                        existing.path = pred.path;
-                        existing.landingTimeMs = estLanding;
-                        existing.entityGone = false;
-                    }
-                }
-            }
+                if (pred == null) continue;
 
-            // Если сущность пропала из-за прорисовки (улетела далеко/высоко) — продолжаем таймер до расчётного падения
-            Iterator> it = ACTIVE_PEARLS.entrySet().iterator();
-            while (it.hasNext()) {
-                TrackedPearl tp = it.next().getValue();
-                if (!seenInWorld.contains(tp.id)) {
-                    if (!tp.entityGone) {
-                        tp.entityGone = true;
-                        // Если жемчуг пропал почти в точке приземления (< 2.5 блоков) — значит он уже телепортировал
-                        if (tp.currentPos.squaredDistanceTo(tp.landingPos) < 6.25) {
-                            it.remove();
-                            continue;
-                        }
-                    }
-                    if (now >= tp.landingTimeMs) {
-                        it.remove();
-                    }
+                long remMs = pred.ticksRemaining * 50L;
+                long eta = now + remMs;
+                TrackedPearl existing = TRACKED_PEARLS.get(pearl.getId());
+                if (existing == null) {
+                    Entity owner = pearl.getOwner();
+                    boolean self = (owner == client.player);
+                    String oName = self ? "Жемчуг" : (owner != null ? owner.getName().getString() : "Жемчуг");
+                    TRACKED_PEARLS.put(pearl.getId(), new TrackedPearl(
+                            pearl.getId(), oName, self, pearl.getPos(), pred.landingPos, remMs, eta, pred.path
+                    ));
+                } else {
+                    existing.currentPos = pearl.getPos();
+                    existing.landingPos = pred.landingPos;
+                    existing.etaMs = eta;
+                    existing.totalFlightMs = Math.max(existing.totalFlightMs, remMs);
+                    existing.entityVisible = true;
+                    existing.path = pred.path;
                 }
             }
-        } else {
-            ACTIVE_PEARLS.clear();
         }
+        TRACKED_PEARLS.values().removeIf(tp -> now > tp.etaMs + 150L);
 
         // 1. Авто-спринт
         if (c.autoSprint && client.options != null && client.options.forwardKey.isPressed()
@@ -458,10 +436,10 @@ public final class EffectManager {
         if (mc.world == null) return null;
         Vec3d pos = pearl.getPos();
         Vec3d vel = pearl.getVelocity();
-        List<Vec3d> path = new ArrayList<>(64);
+        List<Vec3d> path = new ArrayList<>(48);
         path.add(pos);
 
-        for (int tick = 1; tick <= 160; tick++) {
+        for (int tick = 1; tick <= 140; tick++) {
             Vec3d nextPos = pos.add(vel);
             BlockHitResult hit = mc.world.raycast(new RaycastContext(
                     pos, nextPos,
@@ -473,202 +451,14 @@ public final class EffectManager {
                 path.add(hit.getPos());
                 return new PearlPrediction(hit.getPos(), tick, path);
             }
-            if (nextPos.y < mc.world.getBottomY() - 32) {
-                return new PearlPrediction(nextPos, tick, path);
-            }
+            if (nextPos.y < mc.world.getBottomY() - 16) return null;
 
             path.add(nextPos);
             pos = nextPos;
             float drag = mc.world.getFluidState(BlockPos.ofFloored(pos)).isEmpty() ? 0.99f : 0.80f;
             vel = vel.multiply(drag).add(0.0, -0.03, 0.0);
         }
-        return new PearlPrediction(pos, 160, path);
-    }
-
-    // === ГЛАДКИЙ КАСТОМНЫЙ ПРИЦЕЛ (8 СТИЛЕЙ БЕЗ КУБИКОВ) ===
-    public static void renderCustomCrosshair(DrawContext ctx, MinecraftClient mc) {
-        if (mc == null || mc.player == null || mc.options == null) return;
-        if (!mc.options.getPerspective().isFirstPerson()) return;
-        ArtemConfig c = ArtemConfig.get();
-        if (!c.customCrosshair) return;
-
-        float cx = mc.getWindow().getScaledWidth() / 2.0f;
-        float cy = mc.getWindow().getScaledHeight() / 2.0f;
-
-        float dynSpread = 0f;
-        if (c.crosshairDynamic) {
-            double speed = Math.hypot(mc.player.getX() - mc.player.prevX, mc.player.getZ() - mc.player.prevZ);
-            dynSpread += (float) Math.min(5.0, speed * 16.0);
-            if (!mc.player.isOnGround()) dynSpread += 2.2f;
-            if (HudManager.isAttackingRecently()) dynSpread += 2.5f;
-        }
-
-        float size = Math.max(2.0f, c.crosshairSize);
-        float gap = Math.max(0.0f, c.crosshairGap) + dynSpread;
-        float thick = Math.max(0.8f, c.crosshairThickness);
-        int mainCol = NeonButton.getDynamicColor(c.crosshairColor, 0);
-        int outlineCol = 0xCC0A0A12;
-
-        Matrix4f mat = ctx.getMatrices().peek().getPositionMatrix();
-        RenderSystem.enableBlend();
-        RenderSystem.defaultBlendFunc();
-        RenderSystem.setShader(GameRenderer::getPositionColorProgram);
-
-        BufferBuilder buf = Tessellator.getInstance().begin(VertexFormat.DrawMode.TRIANGLES, VertexFormats.POSITION_COLOR);
-
-        switch (c.crosshairStyle) {
-            case 0 -> { // Гладкий крест
-                drawSmoothLineWithOutline(buf, mat, cx - gap - size, cy, cx - gap, cy, thick, mainCol, outlineCol, c.crosshairOutline);
-                drawSmoothLineWithOutline(buf, mat, cx + gap, cy, cx + gap + size, cy, thick, mainCol, outlineCol, c.crosshairOutline);
-                drawSmoothLineWithOutline(buf, mat, cx, cy - gap - size, cx, cy - gap, thick, mainCol, outlineCol, c.crosshairOutline);
-                drawSmoothLineWithOutline(buf, mat, cx, cy + gap, cx, cy + gap + size, thick, mainCol, outlineCol, c.crosshairOutline);
-            }
-            case 1 -> { // Неоновое кольцо
-                float r = gap + size * 0.65f;
-                if (c.crosshairOutline) addRing(buf, mat, cx, cy, r, thick + 1.2f, 48, outlineCol);
-                addRing(buf, mat, cx, cy, r, thick, 48, mainCol);
-            }
-            case 2 -> { // Динамический круг перезарядки удара
-                float r = gap + size * 0.75f;
-                float cd = mc.player.getAttackCooldownProgress(0.5f);
-                addRing(buf, mat, cx, cy, r, thick, 48, (mainCol & 0x00FFFFFF) | 0x38000000);
-                if (c.crosshairOutline) addArc(buf, mat, cx, cy, r, thick + 1.1f, -90f, -90f + 360f * cd, 48, outlineCol);
-                addArc(buf, mat, cx, cy, r, thick, -90f, -90f + 360f * cd, 48, mainCol);
-            }
-            case 3 -> { // Тактический шеврон (V-прицел)
-                float w = size * 0.95f;
-                float h = size * 0.85f;
-                float topY = cy + gap * 0.35f;
-                drawSmoothLineWithOutline(buf, mat, cx - w, topY + h, cx, topY, thick, mainCol, outlineCol, c.crosshairOutline);
-                drawSmoothLineWithOutline(buf, mat, cx, topY, cx + w, topY + h, thick, mainCol, outlineCol, c.crosshairOutline);
-            }
-            case 4 -> { // Диагональный X-Крест
-                float d1 = gap * 0.72f;
-                float d2 = (gap + size) * 0.72f;
-                drawSmoothLineWithOutline(buf, mat, cx - d2, cy - d2, cx - d1, cy - d1, thick, mainCol, outlineCol, c.crosshairOutline);
-                drawSmoothLineWithOutline(buf, mat, cx + d1, cy - d1, cx + d2, cy - d2, thick, mainCol, outlineCol, c.crosshairOutline);
-                drawSmoothLineWithOutline(buf, mat, cx - d2, cy + d2, cx - d1, cy + d1, thick, mainCol, outlineCol, c.crosshairOutline);
-                drawSmoothLineWithOutline(buf, mat, cx + d1, cy + d1, cx + d2, cy + d2, thick, mainCol, outlineCol, c.crosshairOutline);
-            }
-            case 5 -> { // Гладкий треугольник (Delta)
-                float r = gap + size * 0.85f;
-                float x1 = cx, y1 = cy - r;
-                float x2 = cx + r * 0.866f, y2 = cy + r * 0.5f;
-                float x3 = cx - r * 0.866f, y3 = cy + r * 0.5f;
-                drawSmoothLineWithOutline(buf, mat, x1, y1, x2, y2, thick, mainCol, outlineCol, c.crosshairOutline);
-                drawSmoothLineWithOutline(buf, mat, x2, y2, x3, y3, thick, mainCol, outlineCol, c.crosshairOutline);
-                drawSmoothLineWithOutline(buf, mat, x3, y3, x1, y1, thick, mainCol, outlineCol, c.crosshairOutline);
-            }
-            case 6 -> { // Двойная боковая дуга (Sci-Fi)
-                float r = gap + size * 0.75f;
-                if (c.crosshairOutline) {
-                    addArc(buf, mat, cx, cy, r, thick + 1.1f, -45f, 45f, 24, outlineCol);
-                    addArc(buf, mat, cx, cy, r, thick + 1.1f, 135f, 225f, 24, outlineCol);
-                }
-                addArc(buf, mat, cx, cy, r, thick, -45f, 45f, 24, mainCol);
-                addArc(buf, mat, cx, cy, r, thick, 135f, 225f, 24, mainCol);
-            }
-            default -> { // 7: Точка с мягким неоновым ореолом
-                float haloR = 2.4f + size * 0.45f;
-                addDisc(buf, mat, cx, cy, haloR, 28, (mainCol & 0x00FFFFFF) | 0x36000000);
-                addRing(buf, mat, cx, cy, haloR, 0.9f, 32, (mainCol & 0x00FFFFFF) | 0x99000000);
-            }
-        }
-
-        // Индикатор перезарядки удара вокруг любого стиля
-        if (c.crosshairCooldownRing && c.crosshairStyle != 2) {
-            float cd = mc.player.getAttackCooldownProgress(0.5f);
-            if (cd < 0.99f) {
-                float cdR = gap + size + 2.4f;
-                addArc(buf, mat, cx, cy, cdR, 1.0f, -90f, -90f + 360f * cd, 36, (mainCol & 0x00FFFFFF) | 0xAA000000);
-            }
-        }
-
-        // Центральная гладкая точка
-        if (c.crosshairDot || c.crosshairStyle == 7) {
-            float dotR = Math.max(1.1f, thick * 0.85f);
-            if (c.crosshairOutline) addDisc(buf, mat, cx, cy, dotR + 0.75f, 20, outlineCol);
-            addDisc(buf, mat, cx, cy, dotR, 20, mainCol);
-        }
-
-        BuiltBuffer built = buf.endNullable();
-        if (built != null) {
-            BufferRenderer.drawWithGlobalProgram(built);
-        }
-        RenderSystem.disableBlend();
-    }
-
-    private static void drawSmoothLineWithOutline(BufferBuilder buf, Matrix4f mat, float x1, float y1, float x2, float y2,
-                                                  float thickness, int col, int outlineCol, boolean outline) {
-        if (outline) {
-            addThickLine(buf, mat, x1, y1, x2, y2, thickness + 1.2f, outlineCol);
-        }
-        addThickLine(buf, mat, x1, y1, x2, y2, thickness, col);
-    }
-
-    private static void addThickLine(BufferBuilder buf, Matrix4f mat, float x1, float y1, float x2, float y2, float thickness, int argb) {
-        float dx = x2 - x1;
-        float dy = y2 - y1;
-        float len = (float) Math.hypot(dx, dy);
-        if (len < 0.001f) return;
-        float nx = (-dy / len) * (thickness * 0.5f);
-        float ny = (dx / len) * (thickness * 0.5f);
-
-        int a = (argb >>> 24) & 0xFF, r = (argb >> 16) & 0xFF, g = (argb >> 8) & 0xFF, b = argb & 0xFF;
-        float ax = x1 + nx, ay = y1 + ny;
-        float bx = x1 - nx, by = y1 - ny;
-        float cx = x2 - nx, cy = y2 - ny;
-        float ddx = x2 + nx, ddy = y2 + ny;
-
-        buf.vertex(mat, ax, ay, 0f).color(r, g, b, a);
-        buf.vertex(mat, bx, by, 0f).color(r, g, b, a);
-        buf.vertex(mat, cx, cy, 0f).color(r, g, b, a);
-
-        buf.vertex(mat, ax, ay, 0f).color(r, g, b, a);
-        buf.vertex(mat, cx, cy, 0f).color(r, g, b, a);
-        buf.vertex(mat, ddx, ddy, 0f).color(r, g, b, a);
-    }
-
-    private static void addDisc(BufferBuilder buf, Matrix4f mat, float cx, float cy, float radius, int segs, int argb) {
-        int a = (argb >>> 24) & 0xFF, r = (argb >> 16) & 0xFF, g = (argb >> 8) & 0xFF, b = argb & 0xFF;
-        for (int i = 0; i < segs; i++) {
-            double a1 = (Math.PI * 2.0 * i) / segs;
-            double a2 = (Math.PI * 2.0 * (i + 1)) / segs;
-            buf.vertex(mat, cx, cy, 0f).color(r, g, b, a);
-            buf.vertex(mat, cx + (float) Math.cos(a1) * radius, cy + (float) Math.sin(a1) * radius, 0f).color(r, g, b, a);
-            buf.vertex(mat, cx + (float) Math.cos(a2) * radius, cy + (float) Math.sin(a2) * radius, 0f).color(r, g, b, a);
-        }
-    }
-
-    private static void addRing(BufferBuilder buf, Matrix4f mat, float cx, float cy, float radius, float thickness, int segs, int argb) {
-        addArc(buf, mat, cx, cy, radius, thickness, 0f, 360f, segs, argb);
-    }
-
-    private static void addArc(BufferBuilder buf, Matrix4f mat, float cx, float cy, float radius, float thickness,
-                               float startDeg, float endDeg, int segs, int argb) {
-        float inner = Math.max(0.2f, radius - thickness * 0.5f);
-        float outer = radius + thickness * 0.5f;
-        int a = (argb >>> 24) & 0xFF, r = (argb >> 16) & 0xFF, g = (argb >> 8) & 0xFF, b = argb & 0xFF;
-
-        for (int i = 0; i < segs; i++) {
-            double rad1 = Math.toRadians(startDeg + (endDeg - startDeg) * (i / (double) segs));
-            double rad2 = Math.toRadians(startDeg + (endDeg - startDeg) * ((i + 1) / (double) segs));
-            float c1 = (float) Math.cos(rad1), s1 = (float) Math.sin(rad1);
-            float c2 = (float) Math.cos(rad2), s2 = (float) Math.sin(rad2);
-
-            float ix1 = cx + c1 * inner, iy1 = cy + s1 * inner;
-            float ox1 = cx + c1 * outer, oy1 = cy + s1 * outer;
-            float ix2 = cx + c2 * inner, iy2 = cy + s2 * inner;
-            float ox2 = cx + c2 * outer, oy2 = cy + s2 * outer;
-
-            buf.vertex(mat, ox1, oy1, 0f).color(r, g, b, a);
-            buf.vertex(mat, ix1, iy1, 0f).color(r, g, b, a);
-            buf.vertex(mat, ix2, iy2, 0f).color(r, g, b, a);
-
-            buf.vertex(mat, ox1, oy1, 0f).color(r, g, b, a);
-            buf.vertex(mat, ix2, iy2, 0f).color(r, g, b, a);
-            buf.vertex(mat, ox2, oy2, 0f).color(r, g, b, a);
-        }
+        return new PearlPrediction(pos, 140, path);
     }
 
     public static void renderScreenOverlay(DrawContext ctx, MinecraftClient mc) {
@@ -713,6 +503,7 @@ public final class EffectManager {
         float pitch = cam.getPitch();
         double fov = mc.options.getFov().getValue();
 
+        // Подпись размеров активной границы Трапки / Пласта
         int tpType = resolveTrapPlastType(mc, c);
         if (tpType > 0) {
             BlockPos bp = mc.player.getBlockPos();
@@ -734,42 +525,29 @@ public final class EffectManager {
             }
         }
 
-        // Маркеры полёта и приземления эндер-жемчуга (из сохранённого трекера ACTIVE_PEARLS)
-        if (c.pearlTimer && !ACTIVE_PEARLS.isEmpty()) {
-            int pCol = NeonButton.getDynamicColor(c.pearlColor, 0);
+        // Таймер полёта эндер-жемчуга в точке приземления (работает даже если жемчуг улетел за прорисовку)
+        if (c.pearlTimer && !TRACKED_PEARLS.isEmpty()) {
             long now = System.currentTimeMillis();
-
-            for (TrackedPearl tp : ACTIVE_PEARLS.values()) {
-                long remMs = Math.max(0L, tp.landingTimeMs - now);
-                float sec = remMs / 1000.0f;
-
-                if (!tp.entityGone) {
-                    String flyTxt = String.format(Locale.US, "⏱ %.2fс", sec);
-                    double[] pearlScr = projectToScreen(tp.currentPos.x, tp.currentPos.y + 0.42, tp.currentPos.z, camPos, yaw, pitch, fov, sw, sh);
-                    if (pearlScr != null) {
-                        int tw = Math.round(mc.textRenderer.getWidth(flyTxt) * 0.82f) + 10;
-                        int px = (int) Math.round(pearlScr[0] - tw / 2.0);
-                        int py = (int) Math.round(pearlScr[1] - 13);
-                        NeonButton.fillSmoothRounded(ctx, px, py, tw, 12, 3, NeonButton.HUD_BG_TOP);
-                        NeonButton.drawSmoothRoundedOutline(ctx, px, py, tw, 12, 3, (pCol & 0x00FFFFFF) | 0x99000000);
-                        NeonButton.drawSmallText(ctx, mc.textRenderer, flyTxt, px + 5, py + 3, pCol, 0.82f);
-                    }
-                }
+            int pCol = NeonButton.getDynamicColor(c.pearlColor, 0);
+            for (TrackedPearl tp : TRACKED_PEARLS.values()) {
+                float sec = tp.remainingSeconds(now);
+                if (sec <= 0.01f) continue;
 
                 double[] landScr = projectToScreen(tp.landingPos.x, tp.landingPos.y + 0.45, tp.landingPos.z, camPos, yaw, pitch, fov, sw, sh);
                 if (landScr != null) {
                     double dist = Math.sqrt(mc.player.squaredDistanceTo(tp.landingPos));
-                    String landTxt = String.format(Locale.US, "⬇ %.2fс • %dm", sec, Math.round(dist));
-                    int tw = Math.round(mc.textRenderer.getWidth(landTxt) * 0.80f) + 10;
+                    String landTxt = String.format(Locale.US, "⏱ %.2fс • %dm", sec, Math.round(dist));
+                    int tw = Math.round(mc.textRenderer.getWidth(landTxt) * 0.82f) + 10;
                     int px = (int) Math.round(landScr[0] - tw / 2.0);
                     int py = (int) Math.round(landScr[1] - 12);
-                    NeonButton.fillSmoothRounded(ctx, px, py, tw, 11, 3, NeonButton.HUD_BG_TOP);
-                    NeonButton.drawSmoothRoundedOutline(ctx, px, py, tw, 11, 3, (pCol & 0x00FFFFFF) | 0x88000000);
-                    NeonButton.drawSmallText(ctx, mc.textRenderer, landTxt, px + 5, py + 2, 0xFFF2F2FA, 0.80f);
+                    NeonButton.fillSmoothRounded(ctx, px, py, tw, 12, 3, NeonButton.HUD_BG_TOP);
+                    NeonButton.drawSmoothRoundedOutline(ctx, px, py, tw, 12, 3, (pCol & 0x00FFFFFF) | 0x99000000);
+                    NeonButton.drawSmallText(ctx, mc.textRenderer, landTxt, px + 5, py + 3, pCol, 0.82f);
                 }
             }
         }
 
+        // Отображение Точек (Waypoints) на экране
         if (c.showWaypoints && !c.waypoints.isEmpty()) {
             for (ArtemConfig.Waypoint wp : c.waypoints) {
                 if (wp == null || !wp.enabled) continue;
@@ -895,19 +673,22 @@ public final class EffectManager {
         VertexConsumer lines = consumers.getBuffer(RenderLayer.getLines());
         long now = System.currentTimeMillis();
 
+        // 3D границы Трапки / Пласта по блокам
         int tpType = resolveTrapPlastType(mc, c);
         if (tpType > 0) {
             renderTrapPlastBoundaries(matrices, lines, mc.player.getBlockPos(), cam, c, tpType);
         }
 
-        // 3D траектория, кольцо и высокий световой столб на месте приземления жемчуга
-        if ((c.pearlTimer || c.pearlTrajectory) && !ACTIVE_PEARLS.isEmpty()) {
+        // 3D траектория, маяк и кольцо приземления эндер-жемчуга (видно на любой дистанции)
+        if ((c.pearlTimer || c.pearlTrajectory) && !TRACKED_PEARLS.isEmpty()) {
             int pCol = NeonButton.getDynamicColor(c.pearlColor, 0);
             float pr = ((pCol >> 16) & 0xFF) / 255f;
             float pg = ((pCol >> 8) & 0xFF) / 255f;
             float pb = (pCol & 0xFF) / 255f;
 
-            for (TrackedPearl tp : ACTIVE_PEARLS.values()) {
+            for (TrackedPearl tp : TRACKED_PEARLS.values()) {
+                if (tp.etaMs <= now) continue;
+
                 if (c.pearlTrajectory && tp.path != null && tp.path.size() > 1) {
                     for (int i = 0; i < tp.path.size() - 1; i++) {
                         Vec3d p1 = tp.path.get(i);
@@ -915,17 +696,17 @@ public final class EffectManager {
                         double mx = (p1.x + p2.x) * 0.5 - cam.x;
                         double my = (p1.y + p2.y) * 0.5 - cam.y;
                         double mz = (p1.z + p2.z) * 0.5 - cam.z;
-                        drawBoxColor(matrices, lines, new Box(mx - 0.03, my - 0.03, mz - 0.03, mx + 0.03, my + 0.03, mz + 0.03), pCol, 0.85f);
+                        drawBoxColor(matrices, lines, new Box(mx - 0.025, my - 0.025, mz - 0.025, mx + 0.025, my + 0.025, mz + 0.025), pCol, 0.85f);
                     }
                 }
 
                 double lx = tp.landingPos.x - cam.x;
                 double ly = tp.landingPos.y + 0.03 - cam.y;
                 double lz = tp.landingPos.z - cam.z;
-                draw3DRing(matrices, lines, lx, ly, lz, 0.55, pr, pg, pb, 0.98f);
+                // Двойное кольцо + вертикальный луч-маяк в точке приземления
+                draw3DRing(matrices, lines, lx, ly, lz, 0.52, pr, pg, pb, 0.98f);
                 draw3DRing(matrices, lines, lx, ly + 0.02, lz, 0.28, 1f, 1f, 1f, 0.90f);
-                // Вертикальный световой луч, чтобы точку падения было видно издалека
-                drawBoxColor(matrices, lines, new Box(lx - 0.03, ly, lz - 0.03, lx + 0.03, ly + 4.5, lz + 0.03), pCol, 0.85f);
+                drawBoxColor(matrices, lines, new Box(lx - 0.03, ly, lz - 0.03, lx + 0.03, ly + 2.4, lz + 0.03), pCol, 0.70f);
             }
         }
 
