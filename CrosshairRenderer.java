@@ -1,4 +1,5 @@
-package com.artem.visuals.crosshair;
+
+    package com.artem.visuals.crosshair;
 
 import com.artem.visuals.config.ArtemConfig;
 import com.artem.visuals.hud.HudManager;
@@ -6,7 +7,7 @@ import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.DrawContext;
 
 /**
- * Чёткий кастомный прицел с ровным кольцом и центральной точкой.
+ * Кастомный прицел.
  */
 public final class CrosshairRenderer {
     private CrosshairRenderer() {}
