@@ -4,6 +4,8 @@ import com.artem.visuals.config.ArtemConfig;
 import com.artem.visuals.gui.NeonButton;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.DrawContext;
+import net.minecraft.client.gui.PlayerSkinDrawer;
+import net.minecraft.client.network.AbstractClientPlayerEntity;
 import net.minecraft.client.network.ClientPlayNetworkHandler;
 import net.minecraft.client.network.PlayerListEntry;
 import net.minecraft.client.network.ServerInfo;
@@ -16,7 +18,7 @@ import java.util.Collection;
 import java.util.List;
 
 /**
- * HUD для FunTime: верхний инфо-бар, Potions HUD, TargetHUD, WASD, FPS/Ping/XYZ/CPS.
+ * HUD для FunTime: верхний инфо-бар, Potions HUD, TargetHUD со скином цели, WASD.
  */
 public final class HudManager {
     public static boolean showPotions = true;
@@ -195,9 +197,6 @@ public final class HudManager {
         }
     }
 
-    /**
-     * Верхняя центральная плашка в стиле PulseVisuals: лого + сервер (FunTime) + пинг + FPS.
-     */
     static class TopBarElement extends HudElement {
         TopBarElement() { super("server"); }
         @Override public boolean isEnabled(ArtemConfig c) { return c.showServer; }
@@ -212,7 +211,7 @@ public final class HudManager {
                 if (name.length() > 18) name = name.substring(0, 16) + "…";
                 return name;
             }
-            return mc.isInSingleplayer() ? "FunTime Local" : "Offline";
+            return mc.isInSingleplayer() ? "FunTime" : "Offline";
         }
 
         @Override public int getColor(MinecraftClient mc) { return 0xFFE8E8F4; }
@@ -231,10 +230,9 @@ public final class HudManager {
             String srv = getText(mc);
             String ping = buildPing(mc);
             String fps = buildFps(mc);
-            int w = 18 + mc.textRenderer.getWidth(srv) + 10
+            width = 18 + mc.textRenderer.getWidth(srv) + 10
                     + mc.textRenderer.getWidth(ping) + 10
                     + mc.textRenderer.getWidth(fps) + 8;
-            width = w;
             height = 15;
         }
 
@@ -243,7 +241,6 @@ public final class HudManager {
             NeonButton.fillRounded(ctx, x, y, width, height, 0xD8101018);
             NeonButton.drawRoundedBorder(ctx, x, y, width, height, 0x28FFFFFF);
 
-            // Мини-волна пульса слева
             int wx = x + 5;
             int wy = y + 3;
             ctx.fill(wx, wy + 4, wx + 3, wy + 5, 0xFF7B68EE);
@@ -258,7 +255,6 @@ public final class HudManager {
             ctx.drawText(mc.textRenderer, srv, cx, ty, 0xFFF2F2FA, false);
             cx += mc.textRenderer.getWidth(srv) + 4;
 
-            // Разделитель
             ctx.fill(cx, y + 3, cx + 1, y + height - 3, 0x33FFFFFF);
             cx += 5;
 
@@ -284,9 +280,6 @@ public final class HudManager {
         @Override protected int defaultY() { return 5; }
     }
 
-    /**
-     * Карточка активных зелий слева (Сила II, Скорость II, Огнестойкость и др. для FunTime PvP).
-     */
     static class PotionsElement extends HudElement {
         PotionsElement() { super("potions"); }
         @Override public boolean isEnabled(ArtemConfig c) { return showPotions; }
@@ -347,7 +340,6 @@ public final class HudManager {
             NeonButton.fillRounded(ctx, x, y, width, height, 0xCC101018);
             NeonButton.drawRoundedBorder(ctx, x, y, width, height, 0x22FFFFFF);
 
-            // Иконка зелья + заголовок Potions
             ctx.fill(x + 6, y + 4, x + 9, y + 5, 0xFF9D8DF7);
             ctx.fill(x + 5, y + 5, x + 10, y + 10, 0xFF7B68EE);
             ctx.drawText(mc.textRenderer, "Potions", x + 13, y + 4, 0xFFD8D8E6, false);
@@ -368,7 +360,7 @@ public final class HudManager {
     }
 
     /**
-     * TargetHUD в стиле PulseVisuals под верхним инфо-баром (имя цели, HP и фиолетовая полоса здоровья).
+     * TargetHUD в стиле PulseVisuals с рендером головы скина игрока, HP и фиолетовой полосой.
      */
     static class TargetHudElement extends HudElement {
         private float smoothHp = 20f;
@@ -402,7 +394,7 @@ public final class HudManager {
                 height = 0;
                 return;
             }
-            width = 114;
+            width = 118;
             height = 28;
         }
 
@@ -421,23 +413,24 @@ public final class HudManager {
             NeonButton.fillRounded(ctx, x, y, width, height, 0xD8101018);
             NeonButton.drawRoundedBorder(ctx, x, y, width, height, 0x28FFFFFF);
 
-            // Аватар-иконка слева
             int avSize = 20;
             int ax = x + 4;
             int ay = y + 4;
             NeonButton.fillRounded(ctx, ax, ay, avSize, avSize, 0xFF1C1B2E);
-            NeonButton.drawRoundedBorder(ctx, ax, ay, avSize, avSize, 0x557B68EE);
 
             String name = target.getName().getString();
-            String initial = name.isEmpty() ? "?" : name.substring(0, 1).toUpperCase();
-            ctx.drawCenteredTextWithShadow(mc.textRenderer, initial, ax + avSize / 2, ay + 6, 0xFFB8A9FF);
+            if (target instanceof AbstractClientPlayerEntity player) {
+                PlayerSkinDrawer.draw(ctx, player.getSkinTextures().texture(), ax + 1, ay + 1, avSize - 2);
+            } else {
+                String initial = name.isEmpty() ? "?" : name.substring(0, 1).toUpperCase();
+                ctx.drawCenteredTextWithShadow(mc.textRenderer, initial, ax + avSize / 2, ay + 6, 0xFFB8A9FF);
+            }
+            NeonButton.drawRoundedBorder(ctx, ax, ay, avSize, avSize, 0x447B68EE);
 
-            // Имя цели
             if (name.length() > 13) name = name.substring(0, 12) + "…";
             int tx = ax + avSize + 5;
             ctx.drawText(mc.textRenderer, name, tx, y + 4, 0xFFF2F2FA, false);
 
-            // HP + Absorption
             String hpStr = String.format("HP %.1f", hp);
             ctx.drawText(mc.textRenderer, hpStr, tx, y + 13, 0xFF9696AC, false);
             if (abs > 0.1f) {
@@ -445,7 +438,6 @@ public final class HudManager {
                 ctx.drawText(mc.textRenderer, absStr, tx + mc.textRenderer.getWidth(hpStr) + 3, y + 13, 0xFFFFD166, false);
             }
 
-            // Полоска здоровья снизу (фиолетовый градиент как в PulseVisuals)
             int barX = tx;
             int barY = y + 22;
             int barW = width - (tx - x) - 5;
@@ -461,7 +453,7 @@ public final class HudManager {
         protected int defaultX() {
             MinecraftClient mc = MinecraftClient.getInstance();
             if (mc == null || mc.getWindow() == null) return 150;
-            return (mc.getWindow().getScaledWidth() - 114) / 2;
+            return (mc.getWindow().getScaledWidth() - 118) / 2;
         }
 
         @Override protected int defaultY() { return 24; }
