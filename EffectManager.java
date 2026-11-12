@@ -1,6 +1,8 @@
 package com.artem.visuals.effects;
 
 import com.artem.visuals.config.ArtemConfig;
+import com.artem.visuals.gui.NeonButton;
+import com.artem.visuals.hud.HudManager;
 import net.fabricmc.fabric.api.client.rendering.v1.WorldRenderContext;
 import net.fabricmc.fabric.api.client.rendering.v1.WorldRenderEvents;
 import net.fabricmc.fabric.api.event.player.AttackEntityCallback;
@@ -8,12 +10,18 @@ import net.fabricmc.fabric.api.event.player.PlayerBlockBreakEvents;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.LeavesBlock;
 import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.gui.DrawContext;
+import net.minecraft.client.render.Camera;
 import net.minecraft.client.render.RenderLayer;
 import net.minecraft.client.render.VertexConsumer;
 import net.minecraft.client.render.VertexConsumerProvider;
 import net.minecraft.client.render.WorldRenderer;
 import net.minecraft.client.util.math.MatrixStack;
+import net.minecraft.entity.Entity;
+import net.minecraft.entity.ItemEntity;
 import net.minecraft.entity.LivingEntity;
+import net.minecraft.entity.mob.MobEntity;
+import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.particle.ParticleTypes;
 import net.minecraft.registry.tag.FluidTags;
 import net.minecraft.util.ActionResult;
@@ -25,48 +33,28 @@ import net.minecraft.util.math.Vec3d;
 import net.minecraft.util.shape.VoxelShape;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Map;
 import java.util.Random;
 
 /**
- * Все 3D-визуалы и эффекты PulseVisuals:
- * Nimb, Trails, Target ESP, Jump Circle, Block Overlay, Hit Particles, World Customizer, Render Tweaks.
+ * Все 3D и 2D визуальные функции ARTEM VISUALS 3.0:
+ * ESP, Player Highlight, Tracers, Chams, NameTags, Item ESP, Mob ESP, Entity Highlight,
+ * HitParticles, Damage Indicator, Target ESP, Jump Circle, Trails, Nimb, Block Overlay, World Customizer.
  */
 public final class EffectManager {
-    public static boolean nimb = true;
-    public static int nimbColor = 0xFF6C5CE7;
-
-    public static boolean trails = true;
-    public static int trailLength = 24;
-    public static int trailColor = 0xFF6C5CE7;
-
-    public static boolean targetEsp = true;
-    public static int targetEspColor = 0xFF6C5CE7;
-
-    public static boolean jumpCircle = true;
-    public static float jumpCircleRadius = 1.2f;
-    public static int jumpCircleColor = 0xFF6C5CE7;
-
-    public static boolean blockOverlay = true;
-    public static float blockOverlayAlpha = 0.85f;
-    public static int blockOverlayColor = 0xFF6C5CE7;
-
-    public static boolean hitParticles = true;
-    public static boolean renderTweaks = true;
-    public static boolean motionBlur = false;
-
-    public static boolean worldCustomizer = true;
-    public static int worldTimeMode = 0; // 0 = Сервер, 1 = День, 2 = Закат, 3 = Ночь
-    public static boolean skyTint = true;
-
     private static final Random RNG = new Random();
     private static final List<JumpRing> RINGS = new ArrayList<>();
     private static final LinkedList<Vec3d> TRAIL_POINTS = new LinkedList<>();
+    private static final List<DamagePopup> DAMAGE_POPUPS = new ArrayList<>();
+    private static final Map<Integer, Float> LAST_HEALTH_MAP = new HashMap<>();
     private static boolean wasOnGround = true;
 
     private record JumpRing(double x, double y, double z, long createdMs, float maxRadius, int color) {}
+    private record DamagePopup(double x, double y, double z, float amount, long createdMs) {}
 
     private EffectManager() {}
 
@@ -74,10 +62,12 @@ public final class EffectManager {
         WorldRenderEvents.AFTER_TRANSLUCENT.register(EffectManager::onWorldRender);
 
         AttackEntityCallback.EVENT.register((player, world, hand, entity, hitResult) -> {
-            if (world != null && world.isClient && hitParticles && entity != null) {
-                for (int i = 0; i < 14; i++) {
+            ArtemConfig c = ArtemConfig.get();
+            if (world != null && world.isClient && c.hitParticles && entity != null) {
+                int count = Math.max(4, c.hitParticlesCount);
+                for (int i = 0; i < count; i++) {
                     double ox = entity.getX() + (RNG.nextDouble() - 0.5) * 0.9;
-                    double oy = entity.getY() + 0.5 + RNG.nextDouble() * entity.getHeight() * 0.7;
+                    double oy = entity.getY() + 0.4 + RNG.nextDouble() * entity.getHeight() * 0.7;
                     double oz = entity.getZ() + (RNG.nextDouble() - 0.5) * 0.9;
                     world.addParticle(i % 2 == 0 ? ParticleTypes.END_ROD : ParticleTypes.ENCHANT,
                             ox, oy, oz,
@@ -103,31 +93,65 @@ public final class EffectManager {
     }
 
     public static void tick(MinecraftClient client) {
-        if (client == null || client.world == null || client.player == null) return;
-        ArtemConfig c = ArtemConfig.get();
+        HudManager.tick(client);
 
-        // Render Tweaks: отключаем тряску камеры для чистого PvP
-        if (renderTweaks && client.options != null) {
+        if (client == null || client.world == null || client.player == null) {
+            RINGS.clear();
+            TRAIL_POINTS.clear();
+            DAMAGE_POPUPS.clear();
+            LAST_HEALTH_MAP.clear();
+            return;
+        }
+
+        ArtemConfig c = ArtemConfig.get();
+        long now = System.currentTimeMillis();
+
+        if (c.renderTweaks && client.options != null) {
             client.options.getBobView().setValue(false);
         }
 
-        // World Customizer: фиксируем выбранное время суток на клиенте
-        if (worldCustomizer && worldTimeMode > 0) {
-            long targetTime = switch (worldTimeMode) {
-                case 1 -> 6000L;  // День
-                case 2 -> 12700L; // Закат
-                default -> 18000L; // Ночь
+        if (c.worldCustomizer && c.worldTimeMode > 0) {
+            long targetTime = switch (c.worldTimeMode) {
+                case 1 -> 6000L;
+                case 2 -> 12700L;
+                default -> 18000L;
             };
             client.world.setTimeOfDay(targetTime);
         }
 
-        // Запись точек для Trails (неонового шлейфа за игроком)
-        if (trails) {
+        // Отслеживание урона по сущностям для Damage Indicator
+        if (c.damageIndicator) {
+            for (Entity e : client.world.getEntities()) {
+                if (!(e instanceof LivingEntity le) || e == client.player) continue;
+                if (le.squaredDistanceTo(client.player) > 40 * 40) continue;
+                float hp = le.getHealth();
+                Float prev = LAST_HEALTH_MAP.put(le.getId(), hp);
+                if (prev != null && hp < prev - 0.1f) {
+                    DAMAGE_POPUPS.add(new DamagePopup(
+                            le.getX() + (RNG.nextDouble() - 0.5) * 0.4,
+                            le.getEyeY() + 0.25,
+                            le.getZ() + (RNG.nextDouble() - 0.5) * 0.4,
+                            prev - hp,
+                            now
+                    ));
+                }
+            }
+            if (LAST_HEALTH_MAP.size() > 256) {
+                LAST_HEALTH_MAP.clear();
+            }
+        } else {
+            DAMAGE_POPUPS.clear();
+            LAST_HEALTH_MAP.clear();
+        }
+        DAMAGE_POPUPS.removeIf(p -> now - p.createdMs > 950L);
+
+        // Trails
+        if (c.trails) {
             Vec3d pos = new Vec3d(client.player.getX(), client.player.getY() + 0.15, client.player.getZ());
             if (TRAIL_POINTS.isEmpty() || TRAIL_POINTS.getLast().squaredDistanceTo(pos) > 0.004) {
                 TRAIL_POINTS.addLast(pos);
             }
-            while (TRAIL_POINTS.size() > trailLength) {
+            while (TRAIL_POINTS.size() > Math.max(6, c.trailLength)) {
                 TRAIL_POINTS.removeFirst();
             }
         } else {
@@ -136,27 +160,18 @@ public final class EffectManager {
 
         // Jump Circle
         boolean onGround = client.player.isOnGround();
-        if (jumpCircle && wasOnGround && !onGround && client.player.getVelocity().y > 0.12) {
+        if (c.jumpCircle && wasOnGround && !onGround && client.player.getVelocity().y > 0.12) {
             RINGS.add(new JumpRing(
                     client.player.getX(),
                     client.player.getY() + 0.02,
                     client.player.getZ(),
-                    System.currentTimeMillis(),
-                    jumpCircleRadius,
-                    jumpCircleColor
+                    now,
+                    c.jumpCircleRadius,
+                    NeonButton.getDynamicColor(c.jumpCircleColor, 0)
             ));
         }
         wasOnGround = onGround;
-
-        long now = System.currentTimeMillis();
-        Iterator<JumpRing> it = RINGS.iterator();
-        while (it.hasNext()) {
-            JumpRing ring = it.next();
-            long age = now - ring.createdMs;
-            if (age > 850L) {
-                it.remove();
-            }
-        }
+        RINGS.removeIf(ring -> now - ring.createdMs > 850L);
 
         if (!c.masterEnabled) return;
         if (c.adaptive && client.getCurrentFps() < c.fpsThreshold()) return;
@@ -196,6 +211,139 @@ public final class EffectManager {
         }
     }
 
+    /**
+     * 2D-оверлей мировых проекций: NameTags над игроками, Item Labels и всплывающий Damage Indicator.
+     */
+    public static void renderScreenOverlay(DrawContext ctx, MinecraftClient mc) {
+        if (mc == null || mc.world == null || mc.player == null || mc.gameRenderer == null) return;
+        ArtemConfig c = ArtemConfig.get();
+        if (!c.nameTags && !c.damageIndicator && !(c.itemEsp && c.itemEspLabels)) return;
+
+        Camera cam = mc.gameRenderer.getCamera();
+        Vec3d camPos = cam.getPos();
+        float yaw = cam.getYaw();
+        float pitch = cam.getPitch();
+        double fov = mc.options.getFov().getValue();
+        int sw = mc.getWindow().getScaledWidth();
+        int sh = mc.getWindow().getScaledHeight();
+
+        // NameTags и подписи предметов
+        if (c.nameTags || (c.itemEsp && c.itemEspLabels)) {
+            for (Entity e : mc.world.getEntities()) {
+                if (e == mc.player) continue;
+                double distSq = e.squaredDistanceTo(mc.player);
+                if (distSq > 64 * 64) continue;
+
+                if (c.nameTags && e instanceof PlayerEntity target) {
+                    double[] screen = projectToScreen(target.getX(), target.getEyeY() + 0.48, target.getZ(),
+                            camPos, yaw, pitch, fov, sw, sh);
+                    if (screen == null) continue;
+
+                    String name = target.getName().getString();
+                    String hpTxt = c.nameTagsHealth ? String.format(" %.1f❤", target.getHealth()) : "";
+                    String distTxt = c.nameTagsDistance ? String.format(" [%dm]", Math.round(Math.sqrt(distSq))) : "";
+                    String full = name + hpTxt + distTxt;
+
+                    float scale = c.nameTagsScale;
+                    int tw = Math.round(mc.textRenderer.getWidth(full) * scale) + 8;
+                    int th = Math.round(11 * scale);
+                    int px = (int) Math.round(screen[0] - tw / 2.0);
+                    int py = (int) Math.round(screen[1] - th);
+
+                    NeonButton.fillSmoothRounded(ctx, px, py, tw, th, 3, 0xD80E0E18);
+                    NeonButton.drawSmoothRoundedOutline(ctx, px, py, tw, th, 3,
+                            (NeonButton.ACCENT & 0x00FFFFFF) | 0x66000000);
+
+                    float tx = px + 4;
+                    float ty = py + 2 * scale;
+                    NeonButton.drawSmallText(ctx, mc.textRenderer, name, tx, ty, 0xFFF4F4FC, scale);
+                    tx += mc.textRenderer.getWidth(name) * scale;
+                    if (!hpTxt.isEmpty()) {
+                        NeonButton.drawSmallText(ctx, mc.textRenderer, hpTxt, tx, ty, 0xFFFF5E7E, scale);
+                        tx += mc.textRenderer.getWidth(hpTxt) * scale;
+                    }
+                    if (!distTxt.isEmpty()) {
+                        NeonButton.drawSmallText(ctx, mc.textRenderer, distTxt, tx, ty, 0xFF9696B0, scale);
+                    }
+                } else if (c.itemEsp && c.itemEspLabels && e instanceof ItemEntity item && distSq <= 28 * 28) {
+                    double[] screen = projectToScreen(item.getX(), item.getY() + 0.45, item.getZ(),
+                            camPos, yaw, pitch, fov, sw, sh);
+                    if (screen == null) continue;
+                    String label = item.getStack().getName().getString();
+                    if (item.getStack().getCount() > 1) {
+                        label += " x" + item.getStack().getCount();
+                    }
+                    float s = 0.72f;
+                    int tw = Math.round(mc.textRenderer.getWidth(label) * s) + 6;
+                    int px = (int) Math.round(screen[0] - tw / 2.0);
+                    int py = (int) Math.round(screen[1] - 9);
+                    NeonButton.fillSmoothRounded(ctx, px, py, tw, 9, 2, 0xCC0E0E18);
+                    NeonButton.drawSmallText(ctx, mc.textRenderer, label, px + 3, py + 1.5f,
+                            NeonButton.getDynamicColor(c.itemEspColor, 0), s);
+                }
+            }
+        }
+
+        // Damage Indicator
+        if (c.damageIndicator && !DAMAGE_POPUPS.isEmpty()) {
+            long now = System.currentTimeMillis();
+            for (DamagePopup pop : DAMAGE_POPUPS) {
+                long age = now - pop.createdMs;
+                if (age > 950L) continue;
+                float p = age / 950f;
+                double[] screen = projectToScreen(pop.x, pop.y + p * 0.75, pop.z,
+                        camPos, yaw, pitch, fov, sw, sh);
+                if (screen == null) continue;
+
+                int alpha = Math.max(20, Math.round((1f - p) * 255f));
+                int col = (alpha << 24) | 0xFF4D6D;
+                String dmgStr = String.format("-%.1f", pop.amount);
+                NeonButton.drawSmallText(ctx, mc.textRenderer, dmgStr,
+                        (float) screen[0] - 8f, (float) screen[1] - 6f, col, c.damageIndicatorSize);
+            }
+        }
+    }
+
+    private static double[] projectToScreen(double wx, double wy, double wz,
+                                            Vec3d camPos, float yaw, float pitch,
+                                            double fovDeg, int sw, int sh) {
+        double dx = wx - camPos.x;
+        double dy = wy - camPos.y;
+        double dz = wz - camPos.z;
+
+        double yawRad = Math.toRadians(yaw);
+        double pitchRad = Math.toRadians(pitch);
+
+        double fx = -Math.sin(yawRad) * Math.cos(pitchRad);
+        double fy = -Math.sin(pitchRad);
+        double fz = Math.cos(yawRad) * Math.cos(pitchRad);
+
+        double rx = -Math.cos(yawRad);
+        double rz = -Math.sin(yawRad);
+
+        double ux = -rz * fy;
+        double uy = rz * fx - rx * fz;
+        double uz = rx * fy;
+
+        double camX = dx * rx + dz * rz;
+        double camY = dx * ux + dy * uy + dz * uz;
+        double camZ = dx * fx + dy * fy + dz * fz;
+
+        if (camZ <= 0.08) return null;
+
+        double tanHalfFov = Math.tan(Math.toRadians(fovDeg) * 0.5);
+        double aspect = (double) sw / Math.max(1, sh);
+
+        double ndcX = camX / (camZ * tanHalfFov * aspect);
+        double ndcY = camY / (camZ * tanHalfFov);
+
+        double sx = (ndcX + 1.0) * 0.5 * sw;
+        double sy = (1.0 - ndcY) * 0.5 * sh;
+
+        if (sx < -60 || sx > sw + 60 || sy < -60 || sy > sh + 60) return null;
+        return new double[]{sx, sy};
+    }
+
     private static void onWorldRender(WorldRenderContext context) {
         MinecraftClient mc = MinecraftClient.getInstance();
         if (mc == null || mc.world == null || mc.player == null) return;
@@ -204,42 +352,102 @@ public final class EffectManager {
         VertexConsumerProvider consumers = context.consumers();
         if (matrices == null || consumers == null) return;
 
+        ArtemConfig c = ArtemConfig.get();
         Vec3d cam = context.camera().getPos();
         VertexConsumer lines = consumers.getBuffer(RenderLayer.getLines());
         long now = System.currentTimeMillis();
 
-        // 1. Nimb (светящийся 3D-нимб над головой игрока от 3-го лица)
-        if (nimb && !mc.options.getPerspective().isFirstPerson()) {
-            float r = ((nimbColor >> 16) & 0xFF) / 255f;
-            float g = ((nimbColor >> 8) & 0xFF) / 255f;
-            float b = (nimbColor & 0xFF) / 255f;
+        // Вектор взгляда для Tracers
+        double yawRad = Math.toRadians(context.camera().getYaw());
+        double pitchRad = Math.toRadians(context.camera().getPitch());
+        double lookX = -Math.sin(yawRad) * Math.cos(pitchRad) * 0.6;
+        double lookY = -Math.sin(pitchRad) * 0.6;
+        double lookZ = Math.cos(yawRad) * Math.cos(pitchRad) * 0.6;
+
+        // Общий проход по сущностям: ESP, Player Highlight, Tracers, Chams, Item ESP, Mob ESP, Entity Highlight
+        if (c.esp || c.playerHighlight || c.tracers || c.chams || c.itemEsp || c.mobEsp || c.entityHighlight) {
+            float pulse = c.espPulse ? (0.75f + 0.25f * (float) Math.sin(now / 240.0)) : 1.0f;
+
+            for (Entity e : mc.world.getEntities()) {
+                if (e == mc.player) continue;
+                if (e.squaredDistanceTo(mc.player) > 72 * 72) continue;
+
+                Box box = e.getBoundingBox().offset(-cam.x, -cam.y, -cam.z);
+
+                if (e instanceof PlayerEntity) {
+                    if (c.esp) {
+                        int col = NeonButton.getDynamicColor(c.espColor, e.getId() * 150);
+                        drawStyledEsp(matrices, lines, box, col, c.espAlpha * pulse, c.espStyle);
+                    }
+                    if (c.playerHighlight) {
+                        int col = NeonButton.getDynamicColor(c.playerHighlightColor, 0);
+                        drawBoxColor(matrices, lines, box.expand(0.04), col, c.playerHighlightAlpha * pulse);
+                        draw3DRing(matrices, lines, e.getX() - cam.x, e.getY() + 0.03 - cam.y, e.getZ() - cam.z,
+                                0.55, ((col >> 16) & 0xFF) / 255f, ((col >> 8) & 0xFF) / 255f, (col & 0xFF) / 255f,
+                                c.playerHighlightAlpha * 0.8f);
+                    }
+                    if (c.chams) {
+                        int col = NeonButton.getDynamicColor(c.chamsColor, 200);
+                        for (int layer = 1; layer <= 3; layer++) {
+                            drawBoxColor(matrices, lines, box.expand(-0.04 * layer), col, c.chamsAlpha);
+                        }
+                    }
+                    if (c.tracers) {
+                        int col = NeonButton.getDynamicColor(c.tracersColor, 0);
+                        draw3DLine(matrices, lines, lookX, lookY, lookZ,
+                                e.getX() - cam.x, e.getY() + e.getHeight() * 0.5 - cam.y, e.getZ() - cam.z,
+                                col, c.tracersAlpha);
+                    }
+                } else if (e instanceof ItemEntity) {
+                    if (c.itemEsp) {
+                        int col = NeonButton.getDynamicColor(c.itemEspColor, 0);
+                        drawBoxColor(matrices, lines, box.expand(0.05), col, 0.90f);
+                    }
+                } else if (e instanceof MobEntity) {
+                    if (c.mobEsp) {
+                        int col = NeonButton.getDynamicColor(c.mobEspColor, 0);
+                        drawBoxColor(matrices, lines, box, col, 0.80f);
+                    }
+                }
+
+                if (c.entityHighlight && !(e instanceof PlayerEntity)) {
+                    int col = NeonButton.getDynamicColor(c.entityHighlightColor, 0);
+                    drawBoxColor(matrices, lines, box.expand(0.02), col, 0.75f * pulse);
+                }
+            }
+        }
+
+        // Nimb
+        if (c.nimb && !mc.options.getPerspective().isFirstPerson()) {
+            int col = NeonButton.getDynamicColor(c.nimbColor, 0);
+            float r = ((col >> 16) & 0xFF) / 255f;
+            float g = ((col >> 8) & 0xFF) / 255f;
+            float b = (col & 0xFF) / 255f;
             double nx = mc.player.getX() - cam.x;
             double ny = mc.player.getEyeY() + 0.36 + Math.sin(now / 350.0) * 0.03 - cam.y;
             double nz = mc.player.getZ() - cam.z;
-            draw3DRing(matrices, lines, nx, ny, nz, 0.34, r, g, b, 0.95f);
-            draw3DRing(matrices, lines, nx, ny, nz, 0.36, r, g, b, 0.45f);
+            draw3DRing(matrices, lines, nx, ny, nz, c.nimbSize, r, g, b, 0.95f);
+            draw3DRing(matrices, lines, nx, ny, nz, c.nimbSize + 0.025, r, g, b, 0.45f);
         }
 
-        // 2. Trails (неоновый шлейф за игроком)
-        if (trails && TRAIL_POINTS.size() > 2) {
-            float r = ((trailColor >> 16) & 0xFF) / 255f;
-            float g = ((trailColor >> 8) & 0xFF) / 255f;
-            float b = (trailColor & 0xFF) / 255f;
+        // Trails
+        if (c.trails && TRAIL_POINTS.size() > 2) {
             int total = TRAIL_POINTS.size();
             int idx = 0;
             for (Vec3d pt : TRAIL_POINTS) {
+                int col = NeonButton.getDynamicColor(c.trailColor, idx * 45);
                 float alpha = (idx / (float) total) * 0.85f;
                 double px = pt.x - cam.x;
                 double py = pt.y - cam.y;
                 double pz = pt.z - cam.z;
                 Box node = new Box(px - 0.025, py - 0.025, pz - 0.025, px + 0.025, py + 0.025, pz + 0.025);
-                WorldRenderer.drawBox(matrices, lines, node, r, g, b, alpha);
+                drawBoxColor(matrices, lines, node, col, alpha);
                 idx++;
             }
         }
 
-        // 3. Target ESP (пульсирующее 3D-кольцо вокруг цели в PvP)
-        if (targetEsp) {
+        // Target ESP
+        if (c.targetEsp) {
             LivingEntity target = null;
             if (mc.targetedEntity instanceof LivingEntity le && le.isAlive()) {
                 target = le;
@@ -248,21 +456,22 @@ public final class EffectManager {
                 target = mc.player.getAttacking();
             }
             if (target != null) {
-                float r = ((targetEspColor >> 16) & 0xFF) / 255f;
-                float g = ((targetEspColor >> 8) & 0xFF) / 255f;
-                float b = (targetEspColor & 0xFF) / 255f;
-                double wave = (Math.sin(now / 260.0) + 1.0) * 0.5;
+                int col = NeonButton.getDynamicColor(c.targetEspColor, 0);
+                float r = ((col >> 16) & 0xFF) / 255f;
+                float g = ((col >> 8) & 0xFF) / 255f;
+                float b = (col & 0xFF) / 255f;
+                double wave = (Math.sin(now / (260.0 / Math.max(0.3f, c.targetEspSpeed))) + 1.0) * 0.5;
                 double tx = target.getX() - cam.x;
                 double ty = target.getY() + wave * target.getHeight() - cam.y;
                 double tz = target.getZ() - cam.z;
-                double radius = target.getWidth() * 0.85 + 0.15;
+                double radius = target.getWidth() * 0.85 + 0.16;
                 draw3DRing(matrices, lines, tx, ty, tz, radius, r, g, b, 0.95f);
                 draw3DRing(matrices, lines, tx, ty + 0.02, tz, radius + 0.03, r, g, b, 0.45f);
             }
         }
 
-        // 4. Jump Circle (тройное светящееся 3D-кольцо на земле со звёздами)
-        if (jumpCircle && !RINGS.isEmpty()) {
+        // Jump Circle
+        if (c.jumpCircle && !RINGS.isEmpty()) {
             for (JumpRing ring : RINGS) {
                 long age = now - ring.createdMs;
                 if (age > 850L) continue;
@@ -273,9 +482,10 @@ public final class EffectManager {
                 float fade = Math.min(1f, inv * 1.4f);
                 double baseR = 0.22 + ease * ring.maxRadius;
 
-                float r = ((ring.color >> 16) & 0xFF) / 255f;
-                float g = ((ring.color >> 8) & 0xFF) / 255f;
-                float b = (ring.color & 0xFF) / 255f;
+                int col = NeonButton.getDynamicColor(ring.color, 0);
+                float r = ((col >> 16) & 0xFF) / 255f;
+                float g = ((col >> 8) & 0xFF) / 255f;
+                float b = (col & 0xFF) / 255f;
 
                 double cx = ring.x - cam.x;
                 double cy = ring.y - cam.y;
@@ -294,31 +504,71 @@ public final class EffectManager {
             }
         }
 
-        // 5. Block Overlay (двойная неоновая обводка блока под прицелом)
-        if (blockOverlay && mc.crosshairTarget instanceof BlockHitResult hit && hit.getType() == HitResult.Type.BLOCK) {
+        // Block Overlay
+        if (c.blockOverlay && mc.crosshairTarget instanceof BlockHitResult hit && hit.getType() == HitResult.Type.BLOCK) {
             BlockPos pos = hit.getBlockPos();
             BlockState state = mc.world.getBlockState(pos);
             if (!state.isAir()) {
                 VoxelShape shape = state.getOutlineShape(mc.world, pos);
-                float r = ((blockOverlayColor >> 16) & 0xFF) / 255f;
-                float g = ((blockOverlayColor >> 8) & 0xFF) / 255f;
-                float b = (blockOverlayColor & 0xFF) / 255f;
-
+                int col = NeonButton.getDynamicColor(c.blockOverlayColor, 0);
                 if (shape.isEmpty()) {
                     Box box = new Box(pos).expand(0.003).offset(-cam.x, -cam.y, -cam.z);
-                    WorldRenderer.drawBox(matrices, lines, box, r, g, b, blockOverlayAlpha);
-                    WorldRenderer.drawBox(matrices, lines, box.expand(-0.005), r, g, b, blockOverlayAlpha * 0.45f);
+                    drawBoxColor(matrices, lines, box, col, c.blockOverlayAlpha);
+                    drawBoxColor(matrices, lines, box.expand(-0.005), col, c.blockOverlayAlpha * 0.45f);
                 } else {
                     shape.forEachBox((minX, minY, minZ, maxX, maxY, maxZ) -> {
                         Box box = new Box(
                                 pos.getX() + minX, pos.getY() + minY, pos.getZ() + minZ,
                                 pos.getX() + maxX, pos.getY() + maxY, pos.getZ() + maxZ
                         ).expand(0.003).offset(-cam.x, -cam.y, -cam.z);
-                        WorldRenderer.drawBox(matrices, lines, box, r, g, b, blockOverlayAlpha);
-                        WorldRenderer.drawBox(matrices, lines, box.expand(-0.005), r, g, b, blockOverlayAlpha * 0.45f);
+                        drawBoxColor(matrices, lines, box, col, c.blockOverlayAlpha);
+                        drawBoxColor(matrices, lines, box.expand(-0.005), col, c.blockOverlayAlpha * 0.45f);
                     });
                 }
             }
+        }
+    }
+
+    private static void drawStyledEsp(MatrixStack matrices, VertexConsumer lines, Box box, int color, float alpha, int style) {
+        if (style == 2) {
+            drawBoxColor(matrices, lines, box, color, alpha);
+            drawBoxColor(matrices, lines, box.expand(0.035), color, alpha * 0.45f);
+        } else if (style == 1) {
+            double h = (box.maxY - box.minY) * 0.25;
+            drawBoxColor(matrices, lines, new Box(box.minX, box.minY, box.minZ, box.maxX, box.minY + h, box.maxZ), color, alpha);
+            drawBoxColor(matrices, lines, new Box(box.minX, box.maxY - h, box.minZ, box.maxX, box.maxY, box.maxZ), color, alpha);
+        } else {
+            drawBoxColor(matrices, lines, box, color, alpha);
+        }
+    }
+
+    private static void drawBoxColor(MatrixStack matrices, VertexConsumer lines, Box box, int color, float alpha) {
+        if (alpha <= 0.02f) return;
+        float r = ((color >> 16) & 0xFF) / 255f;
+        float g = ((color >> 8) & 0xFF) / 255f;
+        float b = (color & 0xFF) / 255f;
+        WorldRenderer.drawBox(matrices, lines, box, r, g, b, Math.min(1f, alpha));
+    }
+
+    private static void draw3DLine(MatrixStack matrices, VertexConsumer lines,
+                                   double x1, double y1, double z1,
+                                   double x2, double y2, double z2,
+                                   int color, float alpha) {
+        int steps = 28;
+        for (int i = 0; i < steps; i++) {
+            double t1 = i / (double) steps;
+            double t2 = (i + 1) / (double) steps;
+            double ax = x1 + (x2 - x1) * t1;
+            double ay = y1 + (y2 - y1) * t1;
+            double az = z1 + (z2 - z1) * t1;
+            double bx = x1 + (x2 - x1) * t2;
+            double by = y1 + (y2 - y1) * t2;
+            double bz = z1 + (z2 - z1) * t2;
+            Box seg = new Box(
+                    Math.min(ax, bx) - 0.003, Math.min(ay, by) - 0.003, Math.min(az, bz) - 0.003,
+                    Math.max(ax, bx) + 0.003, Math.max(ay, by) + 0.003, Math.max(az, bz) + 0.003
+            );
+            drawBoxColor(matrices, lines, seg, color, alpha);
         }
     }
 
@@ -326,7 +576,7 @@ public final class EffectManager {
                                    double cx, double cy, double cz, double radius,
                                    float r, float g, float b, float alpha) {
         if (radius <= 0.02 || alpha <= 0.02f) return;
-        int segments = 56;
+        int segments = 48;
         for (int i = 0; i < segments; i++) {
             double a1 = (Math.PI * 2.0 * i) / segments;
             double a2 = (Math.PI * 2.0 * (i + 1)) / segments;
