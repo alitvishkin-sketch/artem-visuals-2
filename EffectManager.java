@@ -1,9 +1,9 @@
 package com.artem.visuals.effects;
 
 import com.artem.visuals.config.ArtemConfig;
-import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientBlockBreakEvents;
 import net.fabricmc.fabric.api.client.rendering.v1.WorldRenderContext;
 import net.fabricmc.fabric.api.client.rendering.v1.WorldRenderEvents;
+import net.fabricmc.fabric.api.event.player.PlayerBlockBreakEvents;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.LeavesBlock;
 import net.minecraft.client.MinecraftClient;
@@ -49,9 +49,9 @@ public final class EffectManager {
     public static void registerEvents() {
         WorldRenderEvents.AFTER_TRANSLUCENT.register(EffectManager::onWorldRender);
 
-        ClientBlockBreakEvents.AFTER.register((world, player, pos, state, blockEntity) -> {
+        PlayerBlockBreakEvents.AFTER.register((world, player, pos, state, blockEntity) -> {
             ArtemConfig c = ArtemConfig.get();
-            if (!c.masterEnabled || !c.blockBreakEffects || world == null) return;
+            if (!c.masterEnabled || !c.blockBreakEffects || world == null || !world.isClient) return;
             for (int i = 0; i < 8; i++) {
                 double ox = pos.getX() + 0.2 + RNG.nextDouble() * 0.6;
                 double oy = pos.getY() + 0.2 + RNG.nextDouble() * 0.6;
@@ -95,7 +95,6 @@ public final class EffectManager {
             float ease = 1f - inv * inv * inv;
             double r = 0.2 + ease * ring.maxRadius;
 
-            // Светящийся контур кольца из мелких искр
             int points = 24;
             for (int i = 0; i < points; i++) {
                 double ang = (Math.PI * 2.0 * i) / points + p * 1.5;
@@ -104,7 +103,6 @@ public final class EffectManager {
                 client.world.addParticle(ParticleTypes.ELECTRIC_SPARK, px, ring.y, pz, 0.0, 0.005, 0.0);
             }
 
-            // 8 ярких звёздочек по окружности (как на скриншоте PulseVisuals)
             if (age % 60 < 50) {
                 for (int s = 0; s < 8; s++) {
                     double ang = (Math.PI * 2.0 * s) / 8.0 + p * 2.2;
