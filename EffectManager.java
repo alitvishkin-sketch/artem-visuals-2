@@ -32,18 +32,10 @@ import net.minecraft.util.math.Box;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.util.shape.VoxelShape;
 
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.Iterator;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.Map;
-import java.util.Random;
+import java.util.*;
 
 /**
- * Все 3D и 2D визуальные функции ARTEM VISUALS 3.0:
- * ESP, Player Highlight, Tracers, Chams, NameTags, Item ESP, Mob ESP, Entity Highlight,
- * HitParticles, Damage Indicator, Target ESP, Jump Circle, Trails, Nimb, Block Overlay, World Customizer.
+ * Все 3D и 2D визуальные эффекты ARTEM VISUALS 3.0.
  */
 public final class EffectManager {
     private static final Random RNG = new Random();
@@ -119,7 +111,6 @@ public final class EffectManager {
             client.world.setTimeOfDay(targetTime);
         }
 
-        // Отслеживание урона по сущностям для Damage Indicator
         if (c.damageIndicator) {
             for (Entity e : client.world.getEntities()) {
                 if (!(e instanceof LivingEntity le) || e == client.player) continue;
@@ -136,29 +127,23 @@ public final class EffectManager {
                     ));
                 }
             }
-            if (LAST_HEALTH_MAP.size() > 256) {
-                LAST_HEALTH_MAP.clear();
-            }
+            if (LAST_HEALTH_MAP.size() > 256) LAST_HEALTH_MAP.clear();
         } else {
             DAMAGE_POPUPS.clear();
             LAST_HEALTH_MAP.clear();
         }
         DAMAGE_POPUPS.removeIf(p -> now - p.createdMs > 950L);
 
-        // Trails
         if (c.trails) {
             Vec3d pos = new Vec3d(client.player.getX(), client.player.getY() + 0.15, client.player.getZ());
             if (TRAIL_POINTS.isEmpty() || TRAIL_POINTS.getLast().squaredDistanceTo(pos) > 0.004) {
                 TRAIL_POINTS.addLast(pos);
             }
-            while (TRAIL_POINTS.size() > Math.max(6, c.trailLength)) {
-                TRAIL_POINTS.removeFirst();
-            }
+            while (TRAIL_POINTS.size() > Math.max(6, c.trailLength)) TRAIL_POINTS.removeFirst();
         } else {
             TRAIL_POINTS.clear();
         }
 
-        // Jump Circle
         boolean onGround = client.player.isOnGround();
         if (c.jumpCircle && wasOnGround && !onGround && client.player.getVelocity().y > 0.12) {
             RINGS.add(new JumpRing(
@@ -192,7 +177,6 @@ public final class EffectManager {
                         pos.getX() + RNG.nextDouble(), pos.getY() - 0.05, pos.getZ() + RNG.nextDouble(),
                         0.0, -0.03, 0.0);
             }
-
             if (c.waterSparkles && state.getFluidState().isIn(FluidTags.WATER) && client.world.isAir(pos.up())) {
                 if (RNG.nextFloat() < 0.35f) {
                     client.world.addParticle(ParticleTypes.GLOW,
@@ -200,7 +184,6 @@ public final class EffectManager {
                             0.0, 0.01, 0.0);
                 }
             }
-
             if (c.fireflies && state.isAir() && client.world.getLightLevel(pos) <= 7) {
                 if (RNG.nextFloat() < 0.25f) {
                     client.world.addParticle(ParticleTypes.END_ROD,
@@ -211,12 +194,17 @@ public final class EffectManager {
         }
     }
 
-    /**
-     * 2D-оверлей мировых проекций: NameTags над игроками, Item Labels и всплывающий Damage Indicator.
-     */
     public static void renderScreenOverlay(DrawContext ctx, MinecraftClient mc) {
         if (mc == null || mc.world == null || mc.player == null || mc.gameRenderer == null) return;
         ArtemConfig c = ArtemConfig.get();
+
+        int sw = mc.getWindow().getScaledWidth();
+        int sh = mc.getWindow().getScaledHeight();
+
+        if (c.worldCustomizer && c.colorCorrection) {
+            ctx.fill(0, 0, sw, sh, (NeonButton.ACCENT & 0x00FFFFFF) | 0x16000000);
+        }
+
         if (!c.nameTags && !c.damageIndicator && !(c.itemEsp && c.itemEspLabels)) return;
 
         Camera cam = mc.gameRenderer.getCamera();
@@ -224,10 +212,7 @@ public final class EffectManager {
         float yaw = cam.getYaw();
         float pitch = cam.getPitch();
         double fov = mc.options.getFov().getValue();
-        int sw = mc.getWindow().getScaledWidth();
-        int sh = mc.getWindow().getScaledHeight();
 
-        // NameTags и подписи предметов
         if (c.nameTags || (c.itemEsp && c.itemEspLabels)) {
             for (Entity e : mc.world.getEntities()) {
                 if (e == mc.player) continue;
@@ -244,62 +229,50 @@ public final class EffectManager {
                     String distTxt = c.nameTagsDistance ? String.format(" [%dm]", Math.round(Math.sqrt(distSq))) : "";
                     String full = name + hpTxt + distTxt;
 
-                    float scale = c.nameTagsScale;
-                    int tw = Math.round(mc.textRenderer.getWidth(full) * scale) + 8;
-                    int th = Math.round(11 * scale);
+                    int tw = mc.textRenderer.getWidth(full) + 10;
+                    int th = 14;
                     int px = (int) Math.round(screen[0] - tw / 2.0);
                     int py = (int) Math.round(screen[1] - th);
 
-                    NeonButton.fillSmoothRounded(ctx, px, py, tw, th, 3, 0xD80E0E18);
-                    NeonButton.drawSmoothRoundedOutline(ctx, px, py, tw, th, 3,
-                            (NeonButton.ACCENT & 0x00FFFFFF) | 0x66000000);
+                    NeonButton.fillSmoothRounded(ctx, px, py, tw, th, 4, NeonButton.WINDOW_TOP);
+                    NeonButton.drawSmoothRoundedOutline(ctx, px, py, tw, th, 4, (NeonButton.ACCENT & 0x00FFFFFF) | 0x55000000);
 
-                    float tx = px + 4;
-                    float ty = py + 2 * scale;
-                    NeonButton.drawSmallText(ctx, mc.textRenderer, name, tx, ty, 0xFFF4F4FC, scale);
-                    tx += mc.textRenderer.getWidth(name) * scale;
+                    int tx = px + 5, ty = py + 3;
+                    ctx.drawText(mc.textRenderer, name, tx, ty, 0xFFF4F4FC, false);
+                    tx += mc.textRenderer.getWidth(name);
                     if (!hpTxt.isEmpty()) {
-                        NeonButton.drawSmallText(ctx, mc.textRenderer, hpTxt, tx, ty, 0xFFFF5E7E, scale);
-                        tx += mc.textRenderer.getWidth(hpTxt) * scale;
+                        ctx.drawText(mc.textRenderer, hpTxt, tx, ty, 0xFFFF5E7E, false);
+                        tx += mc.textRenderer.getWidth(hpTxt);
                     }
                     if (!distTxt.isEmpty()) {
-                        NeonButton.drawSmallText(ctx, mc.textRenderer, distTxt, tx, ty, 0xFF9696B0, scale);
+                        ctx.drawText(mc.textRenderer, distTxt, tx, ty, 0xFF9696B0, false);
                     }
                 } else if (c.itemEsp && c.itemEspLabels && e instanceof ItemEntity item && distSq <= 28 * 28) {
                     double[] screen = projectToScreen(item.getX(), item.getY() + 0.45, item.getZ(),
                             camPos, yaw, pitch, fov, sw, sh);
                     if (screen == null) continue;
                     String label = item.getStack().getName().getString();
-                    if (item.getStack().getCount() > 1) {
-                        label += " x" + item.getStack().getCount();
-                    }
-                    float s = 0.72f;
-                    int tw = Math.round(mc.textRenderer.getWidth(label) * s) + 6;
+                    if (item.getStack().getCount() > 1) label += " x" + item.getStack().getCount();
+                    int tw = mc.textRenderer.getWidth(label) + 8;
                     int px = (int) Math.round(screen[0] - tw / 2.0);
-                    int py = (int) Math.round(screen[1] - 9);
-                    NeonButton.fillSmoothRounded(ctx, px, py, tw, 9, 2, 0xCC0E0E18);
-                    NeonButton.drawSmallText(ctx, mc.textRenderer, label, px + 3, py + 1.5f,
-                            NeonButton.getDynamicColor(c.itemEspColor, 0), s);
+                    int py = (int) Math.round(screen[1] - 12);
+                    NeonButton.fillSmoothRounded(ctx, px, py, tw, 12, 3, NeonButton.WINDOW_TOP);
+                    ctx.drawText(mc.textRenderer, label, px + 4, py + 2, NeonButton.getDynamicColor(c.itemEspColor, 0), false);
                 }
             }
         }
 
-        // Damage Indicator
         if (c.damageIndicator && !DAMAGE_POPUPS.isEmpty()) {
             long now = System.currentTimeMillis();
             for (DamagePopup pop : DAMAGE_POPUPS) {
                 long age = now - pop.createdMs;
                 if (age > 950L) continue;
                 float p = age / 950f;
-                double[] screen = projectToScreen(pop.x, pop.y + p * 0.75, pop.z,
-                        camPos, yaw, pitch, fov, sw, sh);
+                double[] screen = projectToScreen(pop.x, pop.y + p * 0.75, pop.z, camPos, yaw, pitch, fov, sw, sh);
                 if (screen == null) continue;
-
-                int alpha = Math.max(20, Math.round((1f - p) * 255f));
-                int col = (alpha << 24) | 0xFF4D6D;
-                String dmgStr = String.format("-%.1f", pop.amount);
-                NeonButton.drawSmallText(ctx, mc.textRenderer, dmgStr,
-                        (float) screen[0] - 8f, (float) screen[1] - 6f, col, c.damageIndicatorSize);
+                int alpha = Math.max(25, Math.round((1f - p) * 255f));
+                ctx.drawText(mc.textRenderer, String.format("-%.1f", pop.amount),
+                        (int) Math.round(screen[0]) - 8, (int) Math.round(screen[1]) - 6, (alpha << 24) | 0xFF4D6D, true);
             }
         }
     }
@@ -307,47 +280,23 @@ public final class EffectManager {
     private static double[] projectToScreen(double wx, double wy, double wz,
                                             Vec3d camPos, float yaw, float pitch,
                                             double fovDeg, int sw, int sh) {
-        double dx = wx - camPos.x;
-        double dy = wy - camPos.y;
-        double dz = wz - camPos.z;
-
-        double yawRad = Math.toRadians(yaw);
-        double pitchRad = Math.toRadians(pitch);
-
-        double fx = -Math.sin(yawRad) * Math.cos(pitchRad);
-        double fy = -Math.sin(pitchRad);
-        double fz = Math.cos(yawRad) * Math.cos(pitchRad);
-
-        double rx = -Math.cos(yawRad);
-        double rz = -Math.sin(yawRad);
-
-        double ux = -rz * fy;
-        double uy = rz * fx - rx * fz;
-        double uz = rx * fy;
-
-        double camX = dx * rx + dz * rz;
-        double camY = dx * ux + dy * uy + dz * uz;
-        double camZ = dx * fx + dy * fy + dz * fz;
-
+        double dx = wx - camPos.x, dy = wy - camPos.y, dz = wz - camPos.z;
+        double yawRad = Math.toRadians(yaw), pitchRad = Math.toRadians(pitch);
+        double fx = -Math.sin(yawRad) * Math.cos(pitchRad), fy = -Math.sin(pitchRad), fz = Math.cos(yawRad) * Math.cos(pitchRad);
+        double rx = -Math.cos(yawRad), rz = -Math.sin(yawRad);
+        double ux = -rz * fy, uy = rz * fx - rx * fz, uz = rx * fy;
+        double camX = dx * rx + dz * rz, camY = dx * ux + dy * uy + dz * uz, camZ = dx * fx + dy * fy + dz * fz;
         if (camZ <= 0.08) return null;
-
         double tanHalfFov = Math.tan(Math.toRadians(fovDeg) * 0.5);
         double aspect = (double) sw / Math.max(1, sh);
-
-        double ndcX = camX / (camZ * tanHalfFov * aspect);
-        double ndcY = camY / (camZ * tanHalfFov);
-
-        double sx = (ndcX + 1.0) * 0.5 * sw;
-        double sy = (1.0 - ndcY) * 0.5 * sh;
-
-        if (sx < -60 || sx > sw + 60 || sy < -60 || sy > sh + 60) return null;
-        return new double[]{sx, sy};
+        double sx = (camX / (camZ * tanHalfFov * aspect) + 1.0) * 0.5 * sw;
+        double sy = (1.0 - camY / (camZ * tanHalfFov)) * 0.5 * sh;
+        return (sx < -60 || sx > sw + 60 || sy < -60 || sy > sh + 60) ? null : new double[]{sx, sy};
     }
 
     private static void onWorldRender(WorldRenderContext context) {
         MinecraftClient mc = MinecraftClient.getInstance();
         if (mc == null || mc.world == null || mc.player == null) return;
-
         MatrixStack matrices = context.matrixStack();
         VertexConsumerProvider consumers = context.consumers();
         if (matrices == null || consumers == null) return;
@@ -357,154 +306,87 @@ public final class EffectManager {
         VertexConsumer lines = consumers.getBuffer(RenderLayer.getLines());
         long now = System.currentTimeMillis();
 
-        // Вектор взгляда для Tracers
         double yawRad = Math.toRadians(context.camera().getYaw());
         double pitchRad = Math.toRadians(context.camera().getPitch());
         double lookX = -Math.sin(yawRad) * Math.cos(pitchRad) * 0.6;
         double lookY = -Math.sin(pitchRad) * 0.6;
         double lookZ = Math.cos(yawRad) * Math.cos(pitchRad) * 0.6;
 
-        // Общий проход по сущностям: ESP, Player Highlight, Tracers, Chams, Item ESP, Mob ESP, Entity Highlight
         if (c.esp || c.playerHighlight || c.tracers || c.chams || c.itemEsp || c.mobEsp || c.entityHighlight) {
             float pulse = c.espPulse ? (0.75f + 0.25f * (float) Math.sin(now / 240.0)) : 1.0f;
-
             for (Entity e : mc.world.getEntities()) {
-                if (e == mc.player) continue;
-                if (e.squaredDistanceTo(mc.player) > 72 * 72) continue;
-
+                if (e == mc.player || e.squaredDistanceTo(mc.player) > 72 * 72) continue;
                 Box box = e.getBoundingBox().offset(-cam.x, -cam.y, -cam.z);
-
                 if (e instanceof PlayerEntity) {
-                    if (c.esp) {
-                        int col = NeonButton.getDynamicColor(c.espColor, e.getId() * 150);
-                        drawStyledEsp(matrices, lines, box, col, c.espAlpha * pulse, c.espStyle);
-                    }
-                    if (c.playerHighlight) {
-                        int col = NeonButton.getDynamicColor(c.playerHighlightColor, 0);
-                        drawBoxColor(matrices, lines, box.expand(0.04), col, c.playerHighlightAlpha * pulse);
-                        draw3DRing(matrices, lines, e.getX() - cam.x, e.getY() + 0.03 - cam.y, e.getZ() - cam.z,
-                                0.55, ((col >> 16) & 0xFF) / 255f, ((col >> 8) & 0xFF) / 255f, (col & 0xFF) / 255f,
-                                c.playerHighlightAlpha * 0.8f);
-                    }
+                    if (c.esp) drawStyledEsp(matrices, lines, box, NeonButton.getDynamicColor(c.espColor, e.getId() * 150), c.espAlpha * pulse, c.espStyle);
+                    if (c.playerHighlight) drawBoxColor(matrices, lines, box.expand(0.04), NeonButton.getDynamicColor(c.playerHighlightColor, 0), c.playerHighlightAlpha * pulse);
                     if (c.chams) {
                         int col = NeonButton.getDynamicColor(c.chamsColor, 200);
-                        for (int layer = 1; layer <= 3; layer++) {
-                            drawBoxColor(matrices, lines, box.expand(-0.04 * layer), col, c.chamsAlpha);
-                        }
+                        for (int l = 1; l <= 3; l++) drawBoxColor(matrices, lines, box.expand(-0.04 * l), col, c.chamsAlpha);
                     }
-                    if (c.tracers) {
-                        int col = NeonButton.getDynamicColor(c.tracersColor, 0);
-                        draw3DLine(matrices, lines, lookX, lookY, lookZ,
-                                e.getX() - cam.x, e.getY() + e.getHeight() * 0.5 - cam.y, e.getZ() - cam.z,
-                                col, c.tracersAlpha);
-                    }
-                } else if (e instanceof ItemEntity) {
-                    if (c.itemEsp) {
-                        int col = NeonButton.getDynamicColor(c.itemEspColor, 0);
-                        drawBoxColor(matrices, lines, box.expand(0.05), col, 0.90f);
-                    }
-                } else if (e instanceof MobEntity) {
-                    if (c.mobEsp) {
-                        int col = NeonButton.getDynamicColor(c.mobEspColor, 0);
-                        drawBoxColor(matrices, lines, box, col, 0.80f);
-                    }
+                    if (c.tracers) draw3DLine(matrices, lines, lookX, lookY, lookZ, e.getX() - cam.x, e.getY() + e.getHeight() * 0.5 - cam.y, e.getZ() - cam.z, NeonButton.getDynamicColor(c.tracersColor, 0), c.tracersAlpha);
+                } else if (e instanceof ItemEntity && c.itemEsp) {
+                    drawBoxColor(matrices, lines, box.expand(0.05), NeonButton.getDynamicColor(c.itemEspColor, 0), 0.90f);
+                } else if (e instanceof MobEntity && c.mobEsp) {
+                    drawBoxColor(matrices, lines, box, NeonButton.getDynamicColor(c.mobEspColor, 0), 0.80f);
                 }
-
                 if (c.entityHighlight && !(e instanceof PlayerEntity)) {
-                    int col = NeonButton.getDynamicColor(c.entityHighlightColor, 0);
-                    drawBoxColor(matrices, lines, box.expand(0.02), col, 0.75f * pulse);
+                    drawBoxColor(matrices, lines, box.expand(0.02), NeonButton.getDynamicColor(c.entityHighlightColor, 0), 0.75f * pulse);
                 }
             }
         }
 
-        // Nimb
         if (c.nimb && !mc.options.getPerspective().isFirstPerson()) {
             int col = NeonButton.getDynamicColor(c.nimbColor, 0);
-            float r = ((col >> 16) & 0xFF) / 255f;
-            float g = ((col >> 8) & 0xFF) / 255f;
-            float b = (col & 0xFF) / 255f;
-            double nx = mc.player.getX() - cam.x;
-            double ny = mc.player.getEyeY() + 0.36 + Math.sin(now / 350.0) * 0.03 - cam.y;
-            double nz = mc.player.getZ() - cam.z;
+            float r = ((col >> 16) & 0xFF) / 255f, g = ((col >> 8) & 0xFF) / 255f, b = (col & 0xFF) / 255f;
+            double nx = mc.player.getX() - cam.x, ny = mc.player.getEyeY() + 0.36 + Math.sin(now / 350.0) * 0.03 - cam.y, nz = mc.player.getZ() - cam.z;
             draw3DRing(matrices, lines, nx, ny, nz, c.nimbSize, r, g, b, 0.95f);
             draw3DRing(matrices, lines, nx, ny, nz, c.nimbSize + 0.025, r, g, b, 0.45f);
         }
 
-        // Trails
         if (c.trails && TRAIL_POINTS.size() > 2) {
-            int total = TRAIL_POINTS.size();
-            int idx = 0;
+            int total = TRAIL_POINTS.size(), idx = 0;
             for (Vec3d pt : TRAIL_POINTS) {
                 int col = NeonButton.getDynamicColor(c.trailColor, idx * 45);
-                float alpha = (idx / (float) total) * 0.85f;
-                double px = pt.x - cam.x;
-                double py = pt.y - cam.y;
-                double pz = pt.z - cam.z;
-                Box node = new Box(px - 0.025, py - 0.025, pz - 0.025, px + 0.025, py + 0.025, pz + 0.025);
-                drawBoxColor(matrices, lines, node, col, alpha);
-                idx++;
+                float alpha = (idx++ / (float) total) * 0.85f;
+                double px = pt.x - cam.x, py = pt.y - cam.y, pz = pt.z - cam.z;
+                drawBoxColor(matrices, lines, new Box(px - 0.025, py - 0.025, pz - 0.025, px + 0.025, py + 0.025, pz + 0.025), col, alpha);
             }
         }
 
-        // Target ESP
         if (c.targetEsp) {
-            LivingEntity target = null;
-            if (mc.targetedEntity instanceof LivingEntity le && le.isAlive()) {
-                target = le;
-            } else if (mc.player.getAttacking() != null && mc.player.getAttacking().isAlive()
-                    && (mc.player.age - mc.player.getLastAttackTime() < 80)) {
-                target = mc.player.getAttacking();
-            }
+            LivingEntity target = (mc.targetedEntity instanceof LivingEntity le && le.isAlive()) ? le
+                    : (mc.player.getAttacking() != null && mc.player.getAttacking().isAlive() && (mc.player.age - mc.player.getLastAttackTime() < 80)) ? mc.player.getAttacking() : null;
             if (target != null) {
                 int col = NeonButton.getDynamicColor(c.targetEspColor, 0);
-                float r = ((col >> 16) & 0xFF) / 255f;
-                float g = ((col >> 8) & 0xFF) / 255f;
-                float b = (col & 0xFF) / 255f;
+                float r = ((col >> 16) & 0xFF) / 255f, g = ((col >> 8) & 0xFF) / 255f, b = (col & 0xFF) / 255f;
                 double wave = (Math.sin(now / (260.0 / Math.max(0.3f, c.targetEspSpeed))) + 1.0) * 0.5;
-                double tx = target.getX() - cam.x;
-                double ty = target.getY() + wave * target.getHeight() - cam.y;
-                double tz = target.getZ() - cam.z;
+                double tx = target.getX() - cam.x, ty = target.getY() + wave * target.getHeight() - cam.y, tz = target.getZ() - cam.z;
                 double radius = target.getWidth() * 0.85 + 0.16;
                 draw3DRing(matrices, lines, tx, ty, tz, radius, r, g, b, 0.95f);
                 draw3DRing(matrices, lines, tx, ty + 0.02, tz, radius + 0.03, r, g, b, 0.45f);
             }
         }
 
-        // Jump Circle
         if (c.jumpCircle && !RINGS.isEmpty()) {
             for (JumpRing ring : RINGS) {
                 long age = now - ring.createdMs;
                 if (age > 850L) continue;
-
-                float p = age / 850f;
-                float inv = 1f - p;
-                float ease = 1f - inv * inv * inv;
-                float fade = Math.min(1f, inv * 1.4f);
+                float p = age / 850f, inv = 1f - p, ease = 1f - inv * inv * inv, fade = Math.min(1f, inv * 1.4f);
                 double baseR = 0.22 + ease * ring.maxRadius;
-
                 int col = NeonButton.getDynamicColor(ring.color, 0);
-                float r = ((col >> 16) & 0xFF) / 255f;
-                float g = ((col >> 8) & 0xFF) / 255f;
-                float b = (col & 0xFF) / 255f;
-
-                double cx = ring.x - cam.x;
-                double cy = ring.y - cam.y;
-                double cz = ring.z - cam.z;
-
+                float r = ((col >> 16) & 0xFF) / 255f, g = ((col >> 8) & 0xFF) / 255f, b = (col & 0xFF) / 255f;
+                double cx = ring.x - cam.x, cy = ring.y - cam.y, cz = ring.z - cam.z;
                 draw3DRing(matrices, lines, cx, cy, cz, baseR - 0.03, r, g, b, fade * 0.45f);
                 draw3DRing(matrices, lines, cx, cy, cz, baseR, r, g, b, fade * 0.95f);
                 draw3DRing(matrices, lines, cx, cy, cz, baseR + 0.035, r, g, b, fade * 0.40f);
-
                 for (int s = 0; s < 8; s++) {
                     double ang = (Math.PI * 2.0 * s) / 8.0 + p * 2.2;
-                    double sx = cx + Math.cos(ang) * baseR;
-                    double sz = cz + Math.sin(ang) * baseR;
-                    draw3DStar(matrices, lines, sx, cy + 0.015, sz, 0.065, r, g, b, fade);
+                    draw3DStar(matrices, lines, cx + Math.cos(ang) * baseR, cy + 0.015, cz + Math.sin(ang) * baseR, 0.065, r, g, b, fade);
                 }
             }
         }
 
-        // Block Overlay
         if (c.blockOverlay && mc.crosshairTarget instanceof BlockHitResult hit && hit.getType() == HitResult.Type.BLOCK) {
             BlockPos pos = hit.getBlockPos();
             BlockState state = mc.world.getBlockState(pos);
@@ -517,10 +399,8 @@ public final class EffectManager {
                     drawBoxColor(matrices, lines, box.expand(-0.005), col, c.blockOverlayAlpha * 0.45f);
                 } else {
                     shape.forEachBox((minX, minY, minZ, maxX, maxY, maxZ) -> {
-                        Box box = new Box(
-                                pos.getX() + minX, pos.getY() + minY, pos.getZ() + minZ,
-                                pos.getX() + maxX, pos.getY() + maxY, pos.getZ() + maxZ
-                        ).expand(0.003).offset(-cam.x, -cam.y, -cam.z);
+                        Box box = new Box(pos.getX() + minX, pos.getY() + minY, pos.getZ() + minZ,
+                                pos.getX() + maxX, pos.getY() + maxY, pos.getZ() + maxZ).expand(0.003).offset(-cam.x, -cam.y, -cam.z);
                         drawBoxColor(matrices, lines, box, col, c.blockOverlayAlpha);
                         drawBoxColor(matrices, lines, box.expand(-0.005), col, c.blockOverlayAlpha * 0.45f);
                     });
@@ -530,78 +410,46 @@ public final class EffectManager {
     }
 
     private static void drawStyledEsp(MatrixStack matrices, VertexConsumer lines, Box box, int color, float alpha, int style) {
-        if (style == 2) {
-            drawBoxColor(matrices, lines, box, color, alpha);
-            drawBoxColor(matrices, lines, box.expand(0.035), color, alpha * 0.45f);
-        } else if (style == 1) {
+        if (style == 2) { drawBoxColor(matrices, lines, box, color, alpha); drawBoxColor(matrices, lines, box.expand(0.035), color, alpha * 0.45f); }
+        else if (style == 1) {
             double h = (box.maxY - box.minY) * 0.25;
             drawBoxColor(matrices, lines, new Box(box.minX, box.minY, box.minZ, box.maxX, box.minY + h, box.maxZ), color, alpha);
             drawBoxColor(matrices, lines, new Box(box.minX, box.maxY - h, box.minZ, box.maxX, box.maxY, box.maxZ), color, alpha);
-        } else {
-            drawBoxColor(matrices, lines, box, color, alpha);
-        }
+        } else drawBoxColor(matrices, lines, box, color, alpha);
     }
 
     private static void drawBoxColor(MatrixStack matrices, VertexConsumer lines, Box box, int color, float alpha) {
         if (alpha <= 0.02f) return;
-        float r = ((color >> 16) & 0xFF) / 255f;
-        float g = ((color >> 8) & 0xFF) / 255f;
-        float b = (color & 0xFF) / 255f;
-        WorldRenderer.drawBox(matrices, lines, box, r, g, b, Math.min(1f, alpha));
+        WorldRenderer.drawBox(matrices, lines, box, ((color >> 16) & 0xFF) / 255f, ((color >> 8) & 0xFF) / 255f, (color & 0xFF) / 255f, Math.min(1f, alpha));
     }
 
-    private static void draw3DLine(MatrixStack matrices, VertexConsumer lines,
-                                   double x1, double y1, double z1,
-                                   double x2, double y2, double z2,
-                                   int color, float alpha) {
+    private static void draw3DLine(MatrixStack matrices, VertexConsumer lines, double x1, double y1, double z1, double x2, double y2, double z2, int color, float alpha) {
         int steps = 28;
         for (int i = 0; i < steps; i++) {
-            double t1 = i / (double) steps;
-            double t2 = (i + 1) / (double) steps;
-            double ax = x1 + (x2 - x1) * t1;
-            double ay = y1 + (y2 - y1) * t1;
-            double az = z1 + (z2 - z1) * t1;
-            double bx = x1 + (x2 - x1) * t2;
-            double by = y1 + (y2 - y1) * t2;
-            double bz = z1 + (z2 - z1) * t2;
-            Box seg = new Box(
-                    Math.min(ax, bx) - 0.003, Math.min(ay, by) - 0.003, Math.min(az, bz) - 0.003,
-                    Math.max(ax, bx) + 0.003, Math.max(ay, by) + 0.003, Math.max(az, bz) + 0.003
-            );
-            drawBoxColor(matrices, lines, seg, color, alpha);
+            double t1 = i / (double) steps, t2 = (i + 1) / (double) steps;
+            double ax = x1 + (x2 - x1) * t1, ay = y1 + (y2 - y1) * t1, az = z1 + (z2 - z1) * t1;
+            double bx = x1 + (x2 - x1) * t2, by = y1 + (y2 - y1) * t2, bz = z1 + (z2 - z1) * t2;
+            drawBoxColor(matrices, lines, new Box(Math.min(ax, bx) - 0.003, Math.min(ay, by) - 0.003, Math.min(az, bz) - 0.003,
+                    Math.max(ax, bx) + 0.003, Math.max(ay, by) + 0.003, Math.max(az, bz) + 0.003), color, alpha);
         }
     }
 
-    private static void draw3DRing(MatrixStack matrices, VertexConsumer lines,
-                                   double cx, double cy, double cz, double radius,
-                                   float r, float g, float b, float alpha) {
+    private static void draw3DRing(MatrixStack matrices, VertexConsumer lines, double cx, double cy, double cz, double radius, float r, float g, float b, float alpha) {
         if (radius <= 0.02 || alpha <= 0.02f) return;
         int segments = 48;
         for (int i = 0; i < segments; i++) {
-            double a1 = (Math.PI * 2.0 * i) / segments;
-            double a2 = (Math.PI * 2.0 * (i + 1)) / segments;
-            double x1 = cx + Math.cos(a1) * radius;
-            double z1 = cz + Math.sin(a1) * radius;
-            double x2 = cx + Math.cos(a2) * radius;
-            double z2 = cz + Math.sin(a2) * radius;
-            Box seg = new Box(
-                    Math.min(x1, x2) - 0.004, cy - 0.004, Math.min(z1, z2) - 0.004,
-                    Math.max(x1, x2) + 0.004, cy + 0.004, Math.max(z1, z2) + 0.004
-            );
-            WorldRenderer.drawBox(matrices, lines, seg, r, g, b, alpha);
+            double a1 = (Math.PI * 2.0 * i) / segments, a2 = (Math.PI * 2.0 * (i + 1)) / segments;
+            double x1 = cx + Math.cos(a1) * radius, z1 = cz + Math.sin(a1) * radius;
+            double x2 = cx + Math.cos(a2) * radius, z2 = cz + Math.sin(a2) * radius;
+            WorldRenderer.drawBox(matrices, lines, new Box(Math.min(x1, x2) - 0.004, cy - 0.004, Math.min(z1, z2) - 0.004,
+                    Math.max(x1, x2) + 0.004, cy + 0.004, Math.max(z1, z2) + 0.004), r, g, b, alpha);
         }
     }
 
-    private static void draw3DStar(MatrixStack matrices, VertexConsumer lines,
-                                   double sx, double sy, double sz, double size,
-                                   float r, float g, float b, float alpha) {
+    private static void draw3DStar(MatrixStack matrices, VertexConsumer lines, double sx, double sy, double sz, double size, float r, float g, float b, float alpha) {
         if (alpha <= 0.02f) return;
-        Box core = new Box(sx - size * 0.35, sy - size * 0.35, sz - size * 0.35,
-                sx + size * 0.35, sy + size * 0.35, sz + size * 0.35);
-        Box beamX = new Box(sx - size, sy - 0.005, sz - 0.005, sx + size, sy + 0.005, sz + 0.005);
-        Box beamZ = new Box(sx - 0.005, sy - 0.005, sz - size, sx + 0.005, sy + 0.005, sz + size);
-        WorldRenderer.drawBox(matrices, lines, core, 1f, 1f, 1f, alpha);
-        WorldRenderer.drawBox(matrices, lines, beamX, r, g, b, alpha * 0.9f);
-        WorldRenderer.drawBox(matrices, lines, beamZ, r, g, b, alpha * 0.9f);
+        WorldRenderer.drawBox(matrices, lines, new Box(sx - size * 0.35, sy - size * 0.35, sz - size * 0.35, sx + size * 0.35, sy + size * 0.35, sz + size * 0.35), 1f, 1f, 1f, alpha);
+        WorldRenderer.drawBox(matrices, lines, new Box(sx - size, sy - 0.005, sz - 0.005, sx + size, sy + 0.005, sz + 0.005), r, g, b, alpha * 0.9f);
+        WorldRenderer.drawBox(matrices, lines, new Box(sx - 0.005, sy - 0.005, sz - size, sx + 0.005, sy + 0.005, sz + size), r, g, b, alpha * 0.9f);
     }
 }
