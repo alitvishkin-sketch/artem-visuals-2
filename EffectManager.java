@@ -24,6 +24,7 @@ import net.minecraft.entity.effect.StatusEffectInstance;
 import net.minecraft.entity.mob.MobEntity;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.entity.projectile.ProjectileEntity;
+import net.minecraft.entity.projectile.thrown.EnderPearlEntity;
 import net.minecraft.item.ItemStack;
 import net.minecraft.particle.ParticleTypes;
 import net.minecraft.registry.tag.FluidTags;
@@ -35,6 +36,7 @@ import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Box;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.util.shape.VoxelShape;
+import net.minecraft.world.RaycastContext;
 import org.lwjgl.glfw.GLFW;
 
 import java.util.*;
@@ -48,13 +50,15 @@ public final class EffectManager {
     private static final Map<Integer, Float> LAST_HEALTH_MAP = new HashMap<>();
     private static boolean wasOnGround = true;
     private static boolean wasDead = false;
-    private static boolean wasAhKeyDown = false;
+    private static boolean wasAhSearchKeyDown = false;
+    private static boolean wasAhOpenKeyDown = false;
     private static long lastRelistReminderMs = 0L;
     private static String helperAlertText = null;
     private static int helperAlertColor = 0xFFFFB703;
 
     private record JumpRing(double x, double y, double z, long createdMs, float maxRadius, int color) {}
     private record DamagePopup(double x, double y, double z, float amount, long createdMs) {}
+    private record PearlPrediction(Vec3d landingPos, int ticksRemaining, List<Vec3d> path) {}
 
     private EffectManager() {}
 
@@ -134,7 +138,6 @@ public final class EffectManager {
         ArtemConfig c = ArtemConfig.get();
         long now = System.currentTimeMillis();
 
-        // --- ХЕЛПЕРЫ ---
         // 1. Авто-спринт
         if (c.autoSprint && client.options != null && client.options.forwardKey.isPressed()
                 && !client.player.isSneaking() && !client.player.horizontalCollision
@@ -158,15 +161,32 @@ public final class EffectManager {
         }
         wasDead = dead;
 
-        // 3. Поиск на /ah по предмету в руке (клавиша H)
-        if (c.ahSearchHandItem && client.currentScreen == null && client.getWindow() != null && c.ahSearchKeyCode > 0) {
-            boolean ahDown = GLFW.glfwGetKey(client.getWindow().getHandle(), c.ahSearchKeyCode) == GLFW.GLFW_PRESS;
-            if (ahDown && !wasAhKeyDown) {
-                triggerAhSearchForHand(client);
+        // 3. Бинды аукциона (/ah и /ah search по предмету в руке)
+        if (client.currentScreen == null && client.getWindow() != null) {
+            long win = client.getWindow().getHandle();
+
+            if (c.ahOpenKeyCode > 0) {
+                boolean openDown = GLFW.glfwGetKey(win, c.ahOpenKeyCode) == GLFW.GLFW_PRESS;
+                if (openDown && !wasAhOpenKeyDown && client.getNetworkHandler() != null) {
+                    client.getNetworkHandler().sendChatCommand("ah");
+                }
+                wasAhOpenKeyDown = openDown;
+            } else {
+                wasAhOpenKeyDown = false;
             }
-            wasAhKeyDown = ahDown;
+
+            if (c.ahSearchHandItem && c.ahSearchKeyCode > 0) {
+                boolean searchDown = GLFW.glfwGetKey(win, c.ahSearchKeyCode) == GLFW.GLFW_PRESS;
+                if (searchDown && !wasAhSearchKeyDown) {
+                    triggerAhSearchForHand(client);
+                }
+                wasAhSearchKeyDown = searchDown;
+            } else {
+                wasAhSearchKeyDown = false;
+            }
         } else {
-            wasAhKeyDown = false;
+            wasAhOpenKeyDown = false;
+            wasAhSearchKeyDown = false;
         }
 
         // 4. Напоминание о перевыставлении лотов на аукционе
@@ -208,7 +228,7 @@ public final class EffectManager {
             }
         }
 
-        // --- ВИЗУАЛЫ ---
+        // Визуалы
         if (c.renderTweaks && client.options != null) {
             client.options.getBobView().setValue(false);
         }
@@ -320,6 +340,53 @@ public final class EffectManager {
         }
     }
 
+    // Определение активного типа границы Трапки (1) или Пласта (2), 0 = не показывать
+    private static int resolveTrapPlastType(MinecraftClient mc, ArtemConfig c) {
+        if (!c.trapPlastPreview || mc == null || mc.player == null) return 0;
+        if (c.trapPlastMode == 1) return 1;
+        if (c.trapPlastMode == 2) return 2;
+
+        // Авто-режим: проверяем название предмета в основной и второй руке
+        ItemStack[] hands = {mc.player.getMainHandStack(), mc.player.getOffHandStack()};
+        for (ItemStack st : hands) {
+            if (st.isEmpty()) continue;
+            String n = st.getName().getString().toLowerCase(Locale.ROOT);
+            if (n.contains("трап") || n.contains("trap")) return 1;
+            if (n.contains("пласт") || n.contains("plast")) return 2;
+        }
+        return 0;
+    }
+
+    // Симуляция баллистики эндер-жемчуга по тикам
+    private static PearlPrediction simulateEnderPearl(MinecraftClient mc, EnderPearlEntity pearl) {
+        if (mc.world == null) return null;
+        Vec3d pos = pearl.getPos();
+        Vec3d vel = pearl.getVelocity();
+        List<Vec3d> path = new ArrayList<>(40);
+        path.add(pos);
+
+        for (int tick = 1; tick <= 120; tick++) {
+            Vec3d nextPos = pos.add(vel);
+            BlockHitResult hit = mc.world.raycast(new RaycastContext(
+                    pos, nextPos,
+                    RaycastContext.ShapeType.COLLIDER,
+                    RaycastContext.FluidHandling.NONE,
+                    pearl
+            ));
+            if (hit.getType() != HitResult.Type.MISS) {
+                path.add(hit.getPos());
+                return new PearlPrediction(hit.getPos(), tick, path);
+            }
+            if (nextPos.y < mc.world.getBottomY() - 16) return null;
+
+            path.add(nextPos);
+            pos = nextPos;
+            float drag = mc.world.getFluidState(BlockPos.ofFloored(pos)).isEmpty() ? 0.99f : 0.80f;
+            vel = vel.multiply(drag).add(0.0, -0.03, 0.0);
+        }
+        return new PearlPrediction(pos, 120, path);
+    }
+
     public static void renderScreenOverlay(DrawContext ctx, MinecraftClient mc) {
         if (mc == null || mc.world == null || mc.player == null || mc.gameRenderer == null) return;
         ArtemConfig c = ArtemConfig.get();
@@ -347,7 +414,6 @@ public final class EffectManager {
             ctx.fill(0, 0, sw, sh, (NeonButton.ACCENT & 0x00FFFFFF) | 0x16000000);
         }
 
-        // Баннер предупреждения хелпера (броня / зелья)
         if (helperAlertText != null) {
             int aw = Math.round(mc.textRenderer.getWidth(helperAlertText) * 0.85f) + 12;
             int ax = (sw - aw) / 2;
@@ -362,6 +428,67 @@ public final class EffectManager {
         float yaw = cam.getYaw();
         float pitch = cam.getPitch();
         double fov = mc.options.getFov().getValue();
+
+        // Подпись размеров активной границы Трапки / Пласта
+        int tpType = resolveTrapPlastType(mc, c);
+        if (tpType > 0) {
+            BlockPos bp = mc.player.getBlockPos();
+            int w = Math.max(3, c.trapPlastWidth);
+            int h = Math.max(2, c.trapPlastHeight);
+            String info = (tpType == 1)
+                    ? String.format("Трапка: %d×%d×%d бл.", w, h, w)
+                    : String.format("Пласт: %d×%d бл.", w, w);
+            double[] scr = projectToScreen(bp.getX() + 0.5, bp.getY() + (tpType == 1 ? h - 0.5 : 0.15), bp.getZ() + 0.5,
+                    camPos, yaw, pitch, fov, sw, sh);
+            if (scr != null) {
+                int col = 0xFF000000 | (c.trapPlastColor & 0x00FFFFFF);
+                int tw = Math.round(mc.textRenderer.getWidth(info) * 0.80f) + 10;
+                int px = (int) Math.round(scr[0] - tw / 2.0);
+                int py = (int) Math.round(scr[1] - 12);
+                NeonButton.fillSmoothRounded(ctx, px, py, tw, 12, 3, NeonButton.HUD_BG_TOP);
+                NeonButton.drawSmoothRoundedOutline(ctx, px, py, tw, 12, 3, (col & 0x00FFFFFF) | 0x88000000);
+                NeonButton.drawSmallText(ctx, mc.textRenderer, info, px + 5, py + 3, col, 0.80f);
+            }
+        }
+
+        // Таймер полёта эндер-жемчуга (на самом жемчуге + на точке приземления)
+        if (c.pearlTimer) {
+            int pCol = NeonButton.getDynamicColor(c.pearlColor, 0);
+            for (Entity e : mc.world.getEntities()) {
+                if (!(e instanceof EnderPearlEntity pearl) || pearl.isOnGround()) continue;
+                if (pearl.squaredDistanceTo(mc.player) > 140 * 140) continue;
+
+                PearlPrediction pred = simulateEnderPearl(mc, pearl);
+                if (pred == null) continue;
+
+                float sec = pred.ticksRemaining / 20.0f;
+                String flyTxt = String.format(Locale.US, "⏱ %.2fс", sec);
+
+                // 1. Плашка над летящим жемчугом
+                double[] pearlScr = projectToScreen(pearl.getX(), pearl.getY() + 0.42, pearl.getZ(), camPos, yaw, pitch, fov, sw, sh);
+                if (pearlScr != null) {
+                    int tw = Math.round(mc.textRenderer.getWidth(flyTxt) * 0.82f) + 10;
+                    int px = (int) Math.round(pearlScr[0] - tw / 2.0);
+                    int py = (int) Math.round(pearlScr[1] - 13);
+                    NeonButton.fillSmoothRounded(ctx, px, py, tw, 12, 3, NeonButton.HUD_BG_TOP);
+                    NeonButton.drawSmoothRoundedOutline(ctx, px, py, tw, 12, 3, (pCol & 0x00FFFFFF) | 0x99000000);
+                    NeonButton.drawSmallText(ctx, mc.textRenderer, flyTxt, px + 5, py + 3, pCol, 0.82f);
+                }
+
+                // 2. Плашка на месте приземления жемчуга
+                double[] landScr = projectToScreen(pred.landingPos.x, pred.landingPos.y + 0.35, pred.landingPos.z, camPos, yaw, pitch, fov, sw, sh);
+                if (landScr != null && pred.landingPos.squaredDistanceTo(pearl.getPos()) > 2.2) {
+                    double dist = Math.sqrt(mc.player.squaredDistanceTo(pred.landingPos));
+                    String landTxt = String.format(Locale.US, "⬇ %.2fс • %dm", sec, Math.round(dist));
+                    int tw = Math.round(mc.textRenderer.getWidth(landTxt) * 0.78f) + 10;
+                    int px = (int) Math.round(landScr[0] - tw / 2.0);
+                    int py = (int) Math.round(landScr[1] - 12);
+                    NeonButton.fillSmoothRounded(ctx, px, py, tw, 11, 3, NeonButton.HUD_BG_TOP);
+                    NeonButton.drawSmoothRoundedOutline(ctx, px, py, tw, 11, 3, (pCol & 0x00FFFFFF) | 0x77000000);
+                    NeonButton.drawSmallText(ctx, mc.textRenderer, landTxt, px + 5, py + 2, 0xFFF2F2FA, 0.78f);
+                }
+            }
+        }
 
         // Отображение Точек (Waypoints) на экране
         if (c.showWaypoints && !c.waypoints.isEmpty()) {
@@ -489,6 +616,45 @@ public final class EffectManager {
         VertexConsumer lines = consumers.getBuffer(RenderLayer.getLines());
         long now = System.currentTimeMillis();
 
+        // 3D границы Трапки / Пласта по блокам
+        int tpType = resolveTrapPlastType(mc, c);
+        if (tpType > 0) {
+            renderTrapPlastBoundaries(matrices, lines, mc.player.getBlockPos(), cam, c, tpType);
+        }
+
+        // 3D траектория и кольцо приземления эндер-жемчуга
+        if (c.pearlTimer || c.pearlTrajectory) {
+            int pCol = NeonButton.getDynamicColor(c.pearlColor, 0);
+            float pr = ((pCol >> 16) & 0xFF) / 255f;
+            float pg = ((pCol >> 8) & 0xFF) / 255f;
+            float pb = (pCol & 0xFF) / 255f;
+
+            for (Entity e : mc.world.getEntities()) {
+                if (!(e instanceof EnderPearlEntity pearl) || pearl.isOnGround()) continue;
+                if (pearl.squaredDistanceTo(mc.player) > 140 * 140) continue;
+
+                PearlPrediction pred = simulateEnderPearl(mc, pearl);
+                if (pred == null) continue;
+
+                if (c.pearlTrajectory && pred.path.size() > 1) {
+                    for (int i = 0; i < pred.path.size() - 1; i++) {
+                        Vec3d p1 = pred.path.get(i);
+                        Vec3d p2 = pred.path.get(i + 1);
+                        double mx = (p1.x + p2.x) * 0.5 - cam.x;
+                        double my = (p1.y + p2.y) * 0.5 - cam.y;
+                        double mz = (p1.z + p2.z) * 0.5 - cam.z;
+                        drawBoxColor(matrices, lines, new Box(mx - 0.02, my - 0.02, mz - 0.02, mx + 0.02, my + 0.02, mz + 0.02), pCol, 0.75f);
+                    }
+                }
+
+                double lx = pred.landingPos.x - cam.x;
+                double ly = pred.landingPos.y + 0.02 - cam.y;
+                double lz = pred.landingPos.z - cam.z;
+                draw3DRing(matrices, lines, lx, ly, lz, 0.42, pr, pg, pb, 0.95f);
+                draw3DRing(matrices, lines, lx, ly + 0.01, lz, 0.22, 1f, 1f, 1f, 0.85f);
+            }
+        }
+
         double yawRad = Math.toRadians(context.camera().getYaw());
         double pitchRad = Math.toRadians(context.camera().getPitch());
         double lookX = -Math.sin(yawRad) * Math.cos(pitchRad) * 0.6;
@@ -602,6 +768,51 @@ public final class EffectManager {
                         drawBoxColor(matrices, lines, box.expand(-0.005), col, c.blockOverlayAlpha * 0.45f);
                     });
                 }
+            }
+        }
+    }
+
+    private static void renderTrapPlastBoundaries(MatrixStack matrices, VertexConsumer lines, BlockPos center, Vec3d cam, ArtemConfig c, int type) {
+        int w = Math.max(3, Math.min(7, c.trapPlastWidth));
+        int h = (type == 1) ? Math.max(2, Math.min(6, c.trapPlastHeight)) : 1;
+        int half = w / 2;
+
+        double minX = (center.getX() - half) - cam.x;
+        double maxX = minX + w;
+        double minZ = (center.getZ() - half) - cam.z;
+        double maxZ = minZ + w;
+        double minY = (center.getY() - 1) - cam.y;
+        double maxY = minY + h;
+
+        int col = NeonButton.getDynamicColor(c.trapPlastColor, 0);
+
+        // Внешний контур всей конструкции (Трапки или Пласта)
+        Box outer = new Box(minX, minY, minZ, maxX, maxY, maxZ);
+        drawBoxColor(matrices, lines, outer, col, 0.92f);
+
+        // Разметка по каждому отдельному блоку
+        if (type == 2) {
+            // Пласт: сетка каждого блока 1x1 под ногами
+            for (int bx = 0; bx < w; bx++) {
+                for (int bz = 0; bz < w; bz++) {
+                    Box cell = new Box(minX + bx + 0.02, minY + 0.01, minZ + bz + 0.02,
+                            minX + bx + 0.98, maxY + 0.01, minZ + bz + 0.98);
+                    drawBoxColor(matrices, lines, cell, col, 0.45f);
+                }
+            }
+        } else {
+            // Трапка: ярусы высоты по блокам + деление стен по 1 блоку
+            for (int by = 1; by < h; by++) {
+                double ly = minY + by;
+                drawBoxColor(matrices, lines, new Box(minX, ly, minZ, maxX, ly + 0.003, maxZ), col, 0.40f);
+            }
+            for (int bx = 1; bx < w; bx++) {
+                double lx = minX + bx;
+                drawBoxColor(matrices, lines, new Box(lx, minY, minZ, lx + 0.003, maxY, maxZ), col, 0.28f);
+            }
+            for (int bz = 1; bz < w; bz++) {
+                double lz = minZ + bz;
+                drawBoxColor(matrices, lines, new Box(minX, minY, lz, maxX, maxY, lz + 0.003), col, 0.28f);
             }
         }
     }
