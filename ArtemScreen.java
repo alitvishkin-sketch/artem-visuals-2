@@ -10,6 +10,7 @@ import net.minecraft.client.gui.PlayerSkinDrawer;
 import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.network.AbstractClientPlayerEntity;
 import net.minecraft.client.network.PlayerListEntry;
+import net.minecraft.client.util.InputUtil;
 import net.minecraft.text.Text;
 import net.minecraft.util.math.BlockPos;
 import org.lwjgl.glfw.GLFW;
@@ -51,13 +52,14 @@ public class ArtemScreen extends Screen {
         }
     }
 
-    private sealed interface RowItem permits ToggleRow, SliderRow, SwatchRow, ActionRow, HeaderLabelRow {}
+    private sealed interface RowItem permits ToggleRow, SliderRow, SwatchRow, ActionRow, HeaderLabelRow, KeybindRow {}
 
     private record HeaderLabelRow(String title, Category category) implements RowItem {}
     private record ToggleRow(String label, Category category, BooleanSupplier getter, Runnable toggler, Runnable onSettings) implements RowItem {}
     private record SliderRow(String label, Category category, double min, double max, boolean integer, DoubleSupplier getter, DoubleConsumer setter) implements RowItem {}
     private record SwatchRow(String label, Category category, int[] palette, IntSupplier getter, IntConsumer setter) implements RowItem {}
     private record ActionRow(String label, Category category, Supplier<String> badgeText, Runnable action) implements RowItem {}
+    private record KeybindRow(String label, Category category, IntSupplier getter, IntConsumer setter) implements RowItem {}
 
     private static final int[] ACCENT_PALETTE = {
             0xFFA594F9, 0xFF8A7CFF, 0xFF00F5FF, 0xFFFF6B9D,
@@ -84,6 +86,7 @@ public class ArtemScreen extends Screen {
     private SliderRow draggingSlider = null;
     private int draggingSliderX = 0;
     private int draggingSliderW = 1;
+    private KeybindRow listeningKeybind = null;
 
     private int winX, winY, winW, winH;
     private int sideW, mainX, mainW, listX, listY, listW, listH;
@@ -126,6 +129,11 @@ public class ArtemScreen extends Screen {
         this.scrollOffset = 0;
     }
 
+    private String formatKeyName(int keyCode) {
+        if (keyCode <= 0) return "Не назначен";
+        return InputUtil.Type.KEYSYM.createFromCode(keyCode).getLocalizedText().getString().toUpperCase(Locale.ROOT);
+    }
+
     private List<RowItem> buildAllRows(ArtemConfig c) {
         List<RowItem> all = new ArrayList<>();
         MinecraftClient mc = MinecraftClient.getInstance();
@@ -146,6 +154,32 @@ public class ArtemScreen extends Screen {
         all.add(new SwatchRow("Цвет прицела", Category.MAIN, ACCENT_PALETTE, () -> c.crosshairColor, v -> { c.crosshairColor = v; c.save(); }));
 
         // === ХЕЛПЕРЫ ===
+        all.add(new HeaderLabelRow("Таймеры и границы PvP", Category.HELPERS));
+        all.add(new ToggleRow("Таймер эндер-жемчуга (время полёта)", Category.HELPERS, () -> c.pearlTimer, () -> { c.pearlTimer = !c.pearlTimer; c.save(); },
+                () -> openSubDetails("Таймер эндер-жемчуга", List.of(
+                        new ToggleRow("Линия траектории полёта", Category.HELPERS, () -> c.pearlTrajectory, () -> { c.pearlTrajectory = !c.pearlTrajectory; c.save(); }, null),
+                        new SwatchRow("Цвет индикатора", Category.HELPERS, ACCENT_PALETTE, () -> c.pearlColor, col -> { c.pearlColor = col; c.save(); })
+                ))));
+        all.add(new ToggleRow("Границы Трапки / Пласта по блокам", Category.HELPERS, () -> c.trapPlastPreview, () -> { c.trapPlastPreview = !c.trapPlastPreview; c.save(); },
+                () -> openSubDetails("Границы Трапки / Пласта", List.of(
+                        new ActionRow("Режим отображения", Category.HELPERS, () -> switch (c.trapPlastMode) {
+                            case 1 -> "Трапка";
+                            case 2 -> "Пласт";
+                            default -> "Авто (предмет)";
+                        }, () -> { c.trapPlastMode = (c.trapPlastMode + 1) % 3; c.save(); }),
+                        new SliderRow("Ширина по блокам", Category.HELPERS, 3, 7, true, () -> c.trapPlastWidth, v -> { c.trapPlastWidth = (int) v; c.save(); }),
+                        new SliderRow("Высота трапки (блоков)", Category.HELPERS, 2, 6, true, () -> c.trapPlastHeight, v -> { c.trapPlastHeight = (int) v; c.save(); }),
+                        new SwatchRow("Цвет сетки блоков", Category.HELPERS, ACCENT_PALETTE, () -> c.trapPlastColor, col -> { c.trapPlastColor = col; c.save(); })
+                ))));
+        all.add(new ActionRow("Режим границ (Трапка / Пласт)", Category.HELPERS, () -> switch (c.trapPlastMode) {
+            case 1 -> "Трапка";
+            case 2 -> "Пласт";
+            default -> "Авто (предмет)";
+        }, () -> { c.trapPlastMode = (c.trapPlastMode + 1) % 3; c.save(); }));
+        all.add(new SliderRow("Размер границы (ширина в блоках)", Category.HELPERS, 3, 7, true, () -> c.trapPlastWidth, v -> { c.trapPlastWidth = (int) v; c.save(); }));
+        all.add(new SliderRow("Высота трапки (в блоках)", Category.HELPERS, 2, 6, true, () -> c.trapPlastHeight, v -> { c.trapPlastHeight = (int) v; c.save(); }));
+
+        all.add(new HeaderLabelRow("Авто-помощники", Category.HELPERS));
         all.add(new ToggleRow("Авто-спринт (AutoSprint)", Category.HELPERS, () -> c.autoSprint, () -> { c.autoSprint = !c.autoSprint; c.save(); }, null));
         all.add(new ToggleRow("Виджет кулдаунов (Жемчуг/Чарка)", Category.HELPERS, () -> c.showCooldowns, () -> { c.showCooldowns = !c.showCooldowns; c.save(); }, null));
         all.add(new ToggleRow("Предупреждение о поломке брони", Category.HELPERS, () -> c.lowArmorAlert, () -> { c.lowArmorAlert = !c.lowArmorAlert; c.save(); }, null));
@@ -160,12 +194,15 @@ public class ArtemScreen extends Screen {
         all.add(new ActionRow("Починить предмет (/fix)", Category.HELPERS, () -> "/fix", () -> sendCmd(mc, "fix")));
 
         // === АУКЦИОН ===
+        all.add(new HeaderLabelRow("Бинды клавиш аукциона", Category.AUCTION));
+        all.add(new KeybindRow("Бинд: открыть аукцион (/ah)", Category.AUCTION, () -> c.ahOpenKeyCode, k -> { c.ahOpenKeyCode = k; c.save(); }));
+        all.add(new KeybindRow("Бинд: /ah search по предмету в руке", Category.AUCTION, () -> c.ahSearchKeyCode, k -> { c.ahSearchKeyCode = k; c.save(); }));
         all.add(new HeaderLabelRow("Помощник", Category.AUCTION));
         all.add(new ToggleRow("Показать цену за один", Category.AUCTION, () -> c.ahUnitPrice, () -> { c.ahUnitPrice = !c.ahUnitPrice; c.save(); }, null));
         all.add(new ToggleRow("Автоперевыставление", Category.AUCTION, () -> c.ahAutoRelist, () -> { c.ahAutoRelist = !c.ahAutoRelist; c.save(); }, null));
         all.add(new SliderRow("Интервал перевыставления (сек)", Category.AUCTION, 10, 300, true, () -> c.ahRelistInterval, v -> { c.ahRelistInterval = (int) v; c.save(); }));
-        all.add(new ToggleRow("/ah search по предмету в руке [H]", Category.AUCTION, () -> c.ahSearchHandItem, () -> { c.ahSearchHandItem = !c.ahSearchHandItem; c.save(); }, null));
-        all.add(new ActionRow("Найти предмет в руке на аукционе", Category.AUCTION, () -> "Поиск", () -> {
+        all.add(new ToggleRow("Включить поиск /ah search по бинду", Category.AUCTION, () -> c.ahSearchHandItem, () -> { c.ahSearchHandItem = !c.ahSearchHandItem; c.save(); }, null));
+        all.add(new ActionRow("Найти предмет в руке на аукционе сейчас", Category.AUCTION, () -> "Поиск", () -> {
             EffectManager.triggerAhSearchForHand(mc);
             close();
         }));
@@ -427,6 +464,7 @@ public class ArtemScreen extends Screen {
         if (r instanceof SliderRow s) return s.label();
         if (r instanceof SwatchRow w) return w.label();
         if (r instanceof ActionRow a) return a.label();
+        if (r instanceof KeybindRow k) return k.label();
         return "";
     }
 
@@ -436,6 +474,7 @@ public class ArtemScreen extends Screen {
         if (r instanceof SliderRow s) return s.category();
         if (r instanceof SwatchRow w) return w.category();
         if (r instanceof ActionRow a) return a.category();
+        if (r instanceof KeybindRow k) return k.category();
         return Category.HELPERS;
     }
 
@@ -638,6 +677,17 @@ public class ArtemScreen extends Screen {
                 NeonButton.fillSmoothRounded(ctx, rightX, cbY, 10, 10, 2, 0xFF282834);
                 NeonButton.drawSmoothRoundedOutline(ctx, rightX, cbY, 10, 10, 2, 0x22FFFFFF);
             }
+        } else if (item instanceof KeybindRow kb) {
+            boolean listening = (listeningKeybind == kb);
+            int keyCode = kb.getter().getAsInt();
+            drawRowBulletIcon(ctx, x + 6, y + 5, listening ? accB : (keyCode > 0 ? accB : 0xFF7D7D94));
+            NeonButton.drawSmallText(ctx, textRenderer, kb.label(), x + 16, y + 6, 0xFFD8D8EA, 0.80f);
+
+            String badge = listening ? "Нажмите клавишу..." : ("[ " + formatKeyName(keyCode) + " ]");
+            int bw = Math.round(textRenderer.getWidth(badge) * 0.76f) + 10;
+            int bx = x + w - bw - 6;
+            NeonButton.fillSmoothRounded(ctx, bx, y + 3, bw, 12, 3, listening ? acc : 0xFF262632);
+            NeonButton.drawSmallText(ctx, textRenderer, badge, bx + 5, y + 6, listening ? 0xFF121218 : accB, 0.76f);
         } else if (item instanceof SliderRow sr) {
             double val = sr.getter().getAsDouble();
             double norm = Math.max(0.0, Math.min(1.0, (val - sr.min()) / Math.max(0.0001, sr.max() - sr.min())));
@@ -683,6 +733,15 @@ public class ArtemScreen extends Screen {
     @Override
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
         ArtemConfig c = ArtemConfig.get();
+
+        if (listeningKeybind != null) {
+            if (button == 1) {
+                listeningKeybind.setter().accept(0);
+                toast("Бинд очищен");
+            }
+            listeningKeybind = null;
+            return true;
+        }
 
         int closeX = winX + winW - 18;
         int closeY = winY + 7;
@@ -745,6 +804,14 @@ public class ArtemScreen extends Screen {
                         if (button == 1 && tr.onSettings() != null) tr.onSettings().run();
                         else tr.toggler().run();
                         return true;
+                    } else if (item instanceof KeybindRow kb) {
+                        if (button == 1) {
+                            kb.setter().accept(0);
+                            toast("Бинд очищен");
+                        } else {
+                            listeningKeybind = kb;
+                        }
+                        return true;
                     } else if (item instanceof SliderRow sr) {
                         draggingSlider = sr;
                         draggingSliderX = listX + 7;
@@ -804,6 +871,7 @@ public class ArtemScreen extends Screen {
 
     @Override
     public boolean charTyped(char chr, int modifiers) {
+        if (listeningKeybind != null) return true;
         if (searchFocused && chr >= 32 && searchQuery.length() < 24) {
             searchQuery += chr;
             scrollOffset = 0;
@@ -814,6 +882,18 @@ public class ArtemScreen extends Screen {
 
     @Override
     public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+        if (listeningKeybind != null) {
+            if (keyCode == GLFW.GLFW_KEY_ESCAPE || keyCode == GLFW.GLFW_KEY_DELETE || keyCode == GLFW.GLFW_KEY_BACKSPACE) {
+                listeningKeybind.setter().accept(0);
+                toast("Бинд очищен");
+            } else {
+                listeningKeybind.setter().accept(keyCode);
+                toast("Назначено: " + formatKeyName(keyCode));
+            }
+            listeningKeybind = null;
+            return true;
+        }
+
         if (searchFocused) {
             if (keyCode == GLFW.GLFW_KEY_BACKSPACE && !searchQuery.isEmpty()) {
                 searchQuery = searchQuery.substring(0, searchQuery.length() - 1);
@@ -925,3 +1005,4 @@ public class ArtemScreen extends Screen {
         return false;
     }
 }
+// === КОНЕЦ ФАЙЛА ===
