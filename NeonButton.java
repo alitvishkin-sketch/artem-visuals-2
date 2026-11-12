@@ -10,15 +10,18 @@ import net.minecraft.text.Text;
 import java.util.function.BooleanSupplier;
 import java.util.function.DoubleConsumer;
 import java.util.function.DoubleSupplier;
+import java.util.function.IntConsumer;
+import java.util.function.IntSupplier;
 import java.util.function.Supplier;
 
 /**
- * Кнопки, тумблеры, плавные слайдеры и иконки дока в стиле PulseVisuals.
+ * Современные UI-компоненты в стиле PulseVisuals: плавные скругления, градиенты, свечение, слайдеры и палитры.
  */
 public class NeonButton extends ClickableWidget {
     public enum Style {
         TOGGLE,
         SLIDER,
+        COLOR_SWATCHES,
         ACTION,
         DOCK_ICON,
         CLOSE_ICON
@@ -39,15 +42,18 @@ public class NeonButton extends ClickableWidget {
     private boolean sliderInteger;
     private boolean draggingSlider;
 
+    // Для палитры цветов
+    private int[] swatchPalette;
+    private IntSupplier swatchGet;
+    private IntConsumer swatchSet;
+
     private float hoverAnim = 0f;
     private float toggleAnim = -1f;
 
-    public static final int BG = 0xE614141F;
-    public static final int BG_HOVER = 0xF21C1C2B;
-    public static final int NEON = 0xFF6C5CE7;
-    public static final int NEON_BRIGHT = 0xFF8B78FF;
-    public static final int TEXT = 0xFFE4E4F0;
-    public static final int TEXT_DIM = 0xFF66667C;
+    public static final int ACCENT = 0xFF6C5CE7;
+    public static final int ACCENT_BRIGHT = 0xFF9D8DF7;
+    public static final int TEXT = 0xFFE6E6F2;
+    public static final int TEXT_DIM = 0xFF686880;
     public static final int TEXT_ON = 0xFFFFFFFF;
 
     public NeonButton(int x, int y, int w, int h, Supplier<String> label, BooleanSupplier state, Runnable action) {
@@ -79,9 +85,22 @@ public class NeonButton extends ClickableWidget {
         return b;
     }
 
+    public static NeonButton swatches(int x, int y, int w, int h, String title,
+                                      int[] palette, IntSupplier get, IntConsumer set) {
+        NeonButton b = new NeonButton(x, y, w, h, () -> title, null, () -> {}, Style.COLOR_SWATCHES, 0);
+        b.swatchPalette = palette;
+        b.swatchGet = get;
+        b.swatchSet = set;
+        return b;
+    }
+
     public NeonButton withRightClick(Runnable onRightClick) {
         this.rightClickAction = onRightClick;
         return this;
+    }
+
+    public boolean hasRightClick() {
+        return rightClickAction != null;
     }
 
     @Override
@@ -96,21 +115,23 @@ public class NeonButton extends ClickableWidget {
         int x = getX(), y = getY(), w = width, h = height;
 
         if (style == Style.CLOSE_ICON) {
-            int bg = hover ? 0x66FF4D6D : 0x1AFFFFFF;
-            fillRounded(ctx, x, y, w, h, bg);
+            int bg = hover ? 0x88FF4D6D : 0x1CFFFFFF;
+            fillSmoothRounded(ctx, x, y, w, h, 4, bg);
             ctx.drawCenteredTextWithShadow(tr, "✕", x + w / 2, y + (h - 8) / 2, hover ? 0xFFFFFFFF : TEXT_DIM);
             return;
         }
 
         if (style == Style.DOCK_ICON) {
             boolean active = state != null && state.getAsBoolean();
-            int bg = active ? NEON : (hover ? 0x2EFFFFFF : 0x14FFFFFF);
-            fillRounded(ctx, x, y, w, h, bg);
             if (active) {
-                ctx.fill(x + 2, y, x + w - 2, y + 1, 0x99C4B5FD);
-                ctx.fill(x + 2, y + h, x + w - 2, y + h + 1, 0x446C5CE7);
+                drawAmbientGlow(ctx, x, y, w, h, 5, ACCENT, 2);
+                fillGradientRounded(ctx, x, y, w, h, 5, ACCENT_BRIGHT, ACCENT);
+                drawSmoothRoundedOutline(ctx, x, y, w, h, 5, 0x66FFFFFF);
+            } else {
+                int bg = hover ? 0x2EFFFFFF : 0x12FFFFFF;
+                fillSmoothRounded(ctx, x, y, w, h, 5, bg);
             }
-            drawDockGlyph(ctx, x + w / 2, y + h / 2, iconIndex, active ? 0xFFFFFFFF : (hover ? 0xFFD0D0E4 : 0xFF7A7A92));
+            drawDockGlyph(ctx, x + w / 2, y + h / 2, iconIndex, active ? 0xFFFFFFFF : (hover ? 0xFFD8D8EC : 0xFF7D7D96));
             return;
         }
 
@@ -119,26 +140,46 @@ public class NeonButton extends ClickableWidget {
             double ratio = (sliderMax > sliderMin) ? Math.max(0.0, Math.min(1.0, (val - sliderMin) / (sliderMax - sliderMin))) : 0.0;
             String valStr = sliderInteger ? String.valueOf((int) Math.round(val)) : String.format("%.1f", val);
 
-            ctx.drawText(tr, rawText, x + 2, y + 1, hover || draggingSlider ? TEXT_ON : TEXT, false);
+            ctx.drawText(tr, rawText, x + 1, y + 1, hover || draggingSlider ? TEXT_ON : TEXT, false);
             int vw = tr.getWidth(valStr);
-            ctx.drawText(tr, valStr, x + w - vw - 2, y + 1, 0xFFB8A9FF, false);
+            fillSmoothRounded(ctx, x + w - vw - 6, y, vw + 6, 10, 3, 0x286C5CE7);
+            ctx.drawText(tr, valStr, x + w - vw - 3, y + 1, 0xFFC4B5FD, false);
 
             int barX = x + 2;
             int barY = y + h - 5;
             int barW = w - 4;
-            int barH = 2;
+            int barH = 3;
 
-            ctx.fill(barX, barY, barX + barW, barY + barH, 0xFF28283A);
+            fillSmoothRounded(ctx, barX, barY, barW, barH, 1, 0xFF252536);
             int fillW = (int) Math.round(barW * ratio);
-            if (fillW > 0) {
-                ctx.fillGradient(barX, barY, barX + fillW, barY + barH, NEON, NEON_BRIGHT);
+            if (fillW > 1) {
+                fillGradientRounded(ctx, barX, barY, fillW, barH, 1, ACCENT, ACCENT_BRIGHT);
             }
 
-            // Белый круглый бегунок как в PulseVisuals
-            int kx = barX + fillW - 2;
-            int ky = barY - 2;
-            ctx.fill(kx, ky + 1, kx + 5, ky + 4, 0xFFFFFFFF);
-            ctx.fill(kx + 1, ky, kx + 4, ky + 5, 0xFFFFFFFF);
+            // Круглый белый бегунок с фиолетовым ореолом
+            int kx = barX + fillW;
+            int ky = barY + 1;
+            drawCircle(ctx, kx, ky, 4, 0x448B78FF);
+            drawCircle(ctx, kx, ky, 3, 0xFFFFFFFF);
+            return;
+        }
+
+        if (style == Style.COLOR_SWATCHES && swatchPalette != null) {
+            ctx.drawText(tr, rawText, x + 1, y + 2, TEXT, false);
+            int current = swatchGet != null ? swatchGet.getAsInt() : swatchPalette[0];
+            int count = swatchPalette.length;
+            int r = 5;
+            int spacing = 15;
+            int startX = x + w - (count - 1) * spacing - r - 2;
+            int cy = y + 6;
+            for (int col : swatchPalette) {
+                if (col == current) {
+                    drawCircle(ctx, startX, cy, r + 2, 0x55FFFFFF);
+                    drawCircle(ctx, startX, cy, r + 1, 0xFFFFFFFF);
+                }
+                drawCircle(ctx, startX, cy, r, col);
+                startX += spacing;
+            }
             return;
         }
 
@@ -146,57 +187,64 @@ public class NeonButton extends ClickableWidget {
         boolean isToggle = (style == Style.TOGGLE && state != null);
         boolean on = isToggle && state.getAsBoolean();
 
-        int bgColor = isToggle
-                ? (on ? (hover ? 0xF21B1A29 : 0xEB151522) : (hover ? 0xD814141E : 0xB80F0F17))
-                : (hover ? BG_HOVER : BG);
-        fillRounded(ctx, x, y, w, h, bgColor);
-
-        int borderColor = on
-                ? (hover ? 0x558B78FF : 0x26FFFFFF)
-                : (hover ? 0x2EFFFFFF : 0x12FFFFFF);
-        drawRoundedBorder(ctx, x, y, w, h, borderColor);
-
         if (isToggle) {
-            if (toggleAnim < 0f) toggleAnim = on ? 1f : 0f;
-            toggleAnim += ((on ? 1f : 0f) - toggleAnim) * 0.32f;
-
-            String cleanName = rawText.replace(": ВКЛ", "").replace(": ВЫКЛ", "");
-            int labelCol = on ? TEXT_ON : (hover ? 0xFF9A9AB2 : TEXT_DIM);
-            ctx.drawText(tr, cleanName, x + 7, y + (h - 8) / 2, labelCol, false);
-
-            // Маленькая точка-индикатор наличия ПКМ настроек
-            if (rightClickAction != null) {
-                int dotX = x + w - 33;
-                int dotY = y + h / 2;
-                ctx.fill(dotX, dotY - 1, dotX + 1, dotY + 1, on ? 0x999D8DF7 : 0x4466667C);
+            if (on) {
+                fillGradientRounded(ctx, x, y, w, h, 5, hover ? 0xF51E1D2F : 0xEB171726, hover ? 0xF5161524 : 0xEB11111C);
+                drawSmoothRoundedOutline(ctx, x, y, w, h, 5, hover ? 0x668B78FF : 0x2E7B68EE);
+            } else {
+                fillSmoothRounded(ctx, x, y, w, h, 5, hover ? 0xDC151520 : 0xBA0F0F17);
+                drawSmoothRoundedOutline(ctx, x, y, w, h, 5, hover ? 0x2AFFFFFF : 0x12FFFFFF);
             }
 
-            // Тумблер справа
-            int tw = 22;
-            int th = 10;
+            if (toggleAnim < 0f) toggleAnim = on ? 1f : 0f;
+            toggleAnim += ((on ? 1f : 0f) - toggleAnim) * 0.30f;
+
+            // Цветной индикатор-точка слева от названия
+            int dotCol = on ? ACCENT_BRIGHT : (hover ? 0xFF5A5A72 : 0xFF343446);
+            drawCircle(ctx, x + 8, y + h / 2, 2, dotCol);
+
+            String cleanName = rawText.replace(": ВКЛ", "").replace(": ВЫКЛ", "");
+            int labelCol = on ? TEXT_ON : (hover ? 0xFFA4A4BC : TEXT_DIM);
+            ctx.drawText(tr, cleanName, x + 14, y + (h - 8) / 2, labelCol, false);
+
+            // Подсказка-шестерёнка для модулей с настройками по ПКМ
+            if (rightClickAction != null) {
+                int gx = x + w - 36;
+                int gy = y + (h - 8) / 2;
+                ctx.drawText(tr, "⚙", gx, gy, on ? 0xAA9D8DF7 : 0x44686880, false);
+            }
+
+            // Плавный тумблер-пилюля справа
+            int tw = 24;
+            int th = 12;
             int tx = x + w - tw - 6;
             int ty = y + (h - th) / 2;
 
-            int trackBg = on ? NEON : 0xFF222230;
-            fillRounded(ctx, tx, ty, tw, th, trackBg);
             if (on) {
-                ctx.fill(tx + 1, ty - 1, tx + tw - 1, ty, 0x388B78FF);
-                ctx.fill(tx + 1, ty + th, tx + tw - 1, ty + th + 1, 0x388B78FF);
+                drawAmbientGlow(ctx, tx, ty, tw, th, 6, ACCENT, 1);
+                fillGradientRounded(ctx, tx, ty, tw, th, 6, ACCENT, ACCENT_BRIGHT);
+            } else {
+                fillSmoothRounded(ctx, tx, ty, tw, th, 6, 0xFF20202E);
+                drawSmoothRoundedOutline(ctx, tx, ty, tw, th, 6, 0x1AFFFFFF);
             }
 
-            int knobSize = 6;
-            int travel = tw - knobSize - 4;
-            int kx = tx + 2 + Math.round(travel * toggleAnim);
-            int ky = ty + 2;
-            ctx.fill(kx, ky, kx + knobSize, ky + knobSize, on ? 0xFFFFFFFF : 0xFF6E6E86);
+            // Круглый бегунок внутри пилюли
+            int travel = tw - 12;
+            int kcx = tx + 6 + Math.round(travel * toggleAnim);
+            int kcy = ty + th / 2;
+            drawCircle(ctx, kcx, kcy, 4, on ? 0xFFFFFFFF : 0xFF72728A);
         } else {
+            fillGradientRounded(ctx, x, y, w, h, 5, hover ? 0xF51F1E32 : 0xEB161624, hover ? 0xF5171626 : 0xEB11111C);
+            drawSmoothRoundedOutline(ctx, x, y, w, h, 5, hover ? 0x558B78FF : 0x20FFFFFF);
+
             int colonIdx = rawText.indexOf(':');
             if (colonIdx > 0 && colonIdx < rawText.length() - 1) {
                 String k = rawText.substring(0, colonIdx + 1);
                 String v = rawText.substring(colonIdx + 1).trim();
-                ctx.drawText(tr, k, x + 7, y + (h - 8) / 2, 0xFFA2A2B8, false);
+                ctx.drawText(tr, k, x + 8, y + (h - 8) / 2, 0xFFA4A4BC, false);
                 int vw = tr.getWidth(v);
-                ctx.drawText(tr, v, x + w - vw - 7, y + (h - 8) / 2, 0xFF9D8DF7, false);
+                fillSmoothRounded(ctx, x + w - vw - 11, y + 3, vw + 6, h - 6, 3, 0x266C5CE7);
+                ctx.drawText(tr, v, x + w - vw - 8, y + (h - 8) / 2, 0xFFB8A9FF, false);
             } else {
                 ctx.drawCenteredTextWithShadow(tr, rawText, x + w / 2, y + (h - 8) / 2, hover ? TEXT_ON : TEXT);
             }
@@ -205,32 +253,33 @@ public class NeonButton extends ClickableWidget {
 
     private void drawDockGlyph(DrawContext ctx, int cx, int cy, int idx, int col) {
         switch (idx) {
-            case 0 -> { // Эффекты (звезда / вспышка)
-                ctx.fill(cx, cy - 4, cx + 1, cy + 5, col);
-                ctx.fill(cx - 4, cy, cx + 5, cy + 1, col);
+            case 0 -> { // Эффекты (4-лучевая звезда + искра)
+                ctx.fill(cx, cy - 5, cx + 1, cy + 6, col);
+                ctx.fill(cx - 5, cy, cx + 6, cy + 1, col);
                 ctx.fill(cx - 2, cy - 2, cx + 3, cy + 3, col);
+                ctx.fill(cx + 3, cy - 4, cx + 5, cy - 2, col);
             }
             case 1 -> { // HUD (сетка виджетов)
-                ctx.fill(cx - 4, cy - 4, cx - 1, cy - 1, col);
-                ctx.fill(cx + 1, cy - 4, cx + 4, cy - 1, col);
-                ctx.fill(cx - 4, cy + 1, cx - 1, cy + 4, col);
-                ctx.fill(cx + 1, cy + 1, cx + 4, cy + 4, col);
+                fillSmoothRounded(ctx, cx - 5, cy - 5, 4, 4, 1, col);
+                fillSmoothRounded(ctx, cx + 1, cy - 5, 4, 4, 1, col);
+                fillSmoothRounded(ctx, cx - 5, cy + 1, 4, 4, 1, col);
+                fillSmoothRounded(ctx, cx + 1, cy + 1, 4, 4, 1, col);
             }
-            case 2 -> { // Прицел (перекрестие)
-                ctx.fill(cx, cy - 4, cx + 1, cy - 1, col);
-                ctx.fill(cx, cy + 2, cx + 1, cy + 5, col);
-                ctx.fill(cx - 4, cy, cx - 1, cy + 1, col);
-                ctx.fill(cx + 2, cy, cx + 5, cy + 1, col);
+            case 2 -> { // Прицел
+                ctx.fill(cx, cy - 5, cx + 1, cy - 1, col);
+                ctx.fill(cx, cy + 2, cx + 1, cy + 6, col);
+                ctx.fill(cx - 5, cy, cx - 1, cy + 1, col);
+                ctx.fill(cx + 2, cy, cx + 6, cy + 1, col);
                 ctx.fill(cx, cy, cx + 1, cy + 1, col);
             }
-            case 3 -> { // Оптимизация / FunTime (молния)
-                ctx.fill(cx, cy - 4, cx + 2, cy, col);
-                ctx.fill(cx - 2, cy - 1, cx + 3, cy + 1, col);
-                ctx.fill(cx - 1, cy, cx + 1, cy + 4, col);
+            case 3 -> { // FunTime / Оптимизация (молния)
+                ctx.fill(cx, cy - 5, cx + 2, cy, col);
+                ctx.fill(cx - 3, cy - 1, cx + 4, cy + 1, col);
+                ctx.fill(cx - 1, cy, cx + 1, cy + 5, col);
             }
             default -> { // Профили (папка)
-                ctx.fill(cx - 4, cy - 3, cx - 1, cy - 2, col);
-                ctx.fill(cx - 4, cy - 2, cx + 4, cy + 3, col);
+                fillSmoothRounded(ctx, cx - 5, cy - 4, 5, 2, 1, col);
+                fillSmoothRounded(ctx, cx - 5, cy - 3, 10, 7, 1, col);
             }
         }
     }
@@ -256,6 +305,21 @@ public class NeonButton extends ClickableWidget {
             draggingSlider = true;
             updateSliderFromMouse(mouseX);
             playDownSound(MinecraftClient.getInstance().getSoundManager());
+            return true;
+        }
+        if (style == Style.COLOR_SWATCHES && button == 0 && swatchPalette != null && swatchSet != null) {
+            int count = swatchPalette.length;
+            int r = 5;
+            int spacing = 15;
+            int startX = getX() + width - (count - 1) * spacing - r - 2;
+            for (int col : swatchPalette) {
+                if (Math.abs(mouseX - startX) <= 7) {
+                    swatchSet.accept(col);
+                    playDownSound(MinecraftClient.getInstance().getSoundManager());
+                    return true;
+                }
+                startX += spacing;
+            }
             return true;
         }
         if (button == 1 && rightClickAction != null) {
@@ -289,30 +353,26 @@ public class NeonButton extends ClickableWidget {
         return super.mouseReleased(mouseX, mouseY, button);
     }
 
-    public static void fillRounded(DrawContext ctx, int x, int y, int w, int h, int color) {
-        if (w <= 2 || h <= 2) {
+    // ——— Плавная 2D-графика ———
+
+    public static void fillSmoothRounded(DrawContext ctx, int x, int y, int w, int h, int r, int color) {
+        if (w <= 0 || h <= 0) return;
+        r = Math.max(0, Math.min(r, Math.min(w / 2, h / 2)));
+        if (r == 0) {
             ctx.fill(x, y, x + w, y + h, color);
             return;
         }
-        ctx.fill(x + 1, y, x + w - 1, y + h, color);
-        ctx.fill(x, y + 1, x + 1, y + h - 1, color);
-        ctx.fill(x + w - 1, y + 1, x + w, y + h - 1, color);
+        // Центральная прямоугольная часть
+        ctx.fill(x, y + r, x + w, y + h - r, color);
+        // Верхний и нижний скруглённые сегменты по строкам
+        for (int i = 0; i < r; i++) {
+            double dy = r - i - 0.5;
+            int inset = (int) Math.round(r - Math.sqrt(Math.max(0.0, r * r - dy * dy)));
+            ctx.fill(x + inset, y + i, x + w - inset, y + i + 1, color);
+            ctx.fill(x + inset, y + h - 1 - i, x + w - inset, y + h - i, color);
+        }
     }
 
-    public static void drawRoundedBorder(DrawContext ctx, int x, int y, int w, int h, int color) {
-        ctx.fill(x + 1, y, x + w - 1, y + 1, color);
-        ctx.fill(x + 1, y + h - 1, x + w - 1, y + h, color);
-        ctx.fill(x, y + 1, x + 1, y + h - 1, color);
-        ctx.fill(x + w - 1, y + 1, x + w, y + h - 1, color);
-    }
-
-    @Override
-    public void onClick(double mouseX, double mouseY) {
-        action.run();
-    }
-
-    @Override
-    protected void appendClickableNarrations(NarrationMessageBuilder builder) {
-        appendDefaultNarrations(builder);
-    }
-}
+    public static void fillGradientRounded(DrawContext ctx, int x, int y, int w, int h, int r, int topColor, int bottomColor) {
+        if (w <= 0 || h <= 0) return;
+        r = Math.max(0,
