@@ -52,7 +52,7 @@ public class ArtemConfig {
         }
     }
 
-    public int configVersion = 35;
+    public int configVersion = 36;
 
     // Базовые настройки
     public boolean masterEnabled = true;
@@ -80,6 +80,7 @@ public class ArtemConfig {
     public boolean showArmor = true;
     public boolean armorDurabilityPercent = false;
     public boolean showCooldowns = true;
+    public boolean showPearlHud = true;
 
     public boolean showArrayList = false;
     public boolean showFps = false;
@@ -147,13 +148,18 @@ public class ArtemConfig {
     public boolean showWaypoints = true;
     public List<Waypoint> waypoints = new ArrayList<>();
 
-    // Маленький меч и камера
+    // Меч, ракурс и анимация удара
     public boolean smallSword = true;
     public boolean onlyWeapons = false;
-    public float swordScale = 0.65f;
-    public float swordOffsetX = 0.03f;
+    public float swordScale = 0.72f;
+    public float swordOffsetX = 0.04f;
     public float swordOffsetY = -0.04f;
-    public float swordOffsetZ = -0.05f;
+    public float swordOffsetZ = -0.06f;
+    public float swordRotX = 0.0f;
+    public float swordRotY = 0.0f;
+    public float swordRotZ = 0.0f;
+    public int swingStyle = 1; // 0=Обычный, 1=Плавный, 2=Снизу вверх, 3=Веер, 4=Укол, 5=Круговой 360
+    public float swingSpeed = 1.0f;
     public boolean handGlow = true;
 
     public boolean noHurtCam = true;
@@ -162,15 +168,17 @@ public class ArtemConfig {
     public boolean screenVignette = true;
     public boolean critSparks = true;
 
-    // Прицел
+    // Кастомный прицел (8 гладких стилей)
     public boolean customCrosshair = true;
     public int crosshairStyle = 0;
-    public int crosshairSize = 4;
-    public int crosshairGap = 2;
-    public int crosshairThickness = 1;
+    public int crosshairSize = 5;
+    public int crosshairGap = 3;
+    public float crosshairThickness = 1.4f;
     public int crosshairColor = 0xFFE8E8F4;
     public boolean crosshairOutline = true;
     public boolean crosshairDynamic = true;
+    public boolean crosshairDot = true;
+    public boolean crosshairCooldownRing = true;
 
     // Visual модули
     public boolean esp = false;
@@ -283,11 +291,16 @@ public class ArtemConfig {
                     if (cfg.keybinds == null) cfg.keybinds = new HashMap<>();
                     if (cfg.friends == null) cfg.friends = new ArrayList<>();
                     if (cfg.waypoints == null) cfg.waypoints = new ArrayList<>();
-                    if (cfg.configVersion < 35) {
-                        cfg.configVersion = 35;
+                    if (cfg.configVersion < 36) {
+                        cfg.configVersion = 36;
                         cfg.pearlTimer = true;
                         cfg.pearlTrajectory = true;
+                        cfg.showPearlHud = true;
                         cfg.trapPlastPreview = true;
+                        cfg.crosshairDot = true;
+                        cfg.crosshairCooldownRing = true;
+                        if (cfg.crosshairThickness < 0.8f) cfg.crosshairThickness = 1.4f;
+                        if (cfg.swingSpeed < 0.2f) cfg.swingSpeed = 1.0f;
                         if (cfg.trapPlastWidth < 3) cfg.trapPlastWidth = 5;
                         if (cfg.trapPlastHeight < 2) cfg.trapPlastHeight = 4;
                         cfg.save();
@@ -351,4 +364,3 @@ public class ArtemConfig {
         return 45;
     }
 }
-// === КОНЕЦ ФАЙЛА ===
