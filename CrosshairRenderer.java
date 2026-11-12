@@ -87,7 +87,6 @@ public final class CrosshairRenderer {
         ctx.fill(x, y, x + w, y + h, color);
     }
 
-    /** Предпросмотр прицела в меню. */
     public static void renderPreview(DrawContext ctx, int cx, int cy, ArtemConfig c) {
         int size = c.crosshairSize;
         int gap = c.crosshairGap;
