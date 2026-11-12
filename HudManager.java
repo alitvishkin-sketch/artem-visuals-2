@@ -242,6 +242,7 @@ public final class HudManager {
         c.smallSword = true; c.noHurtCam = true; c.lowFire = true;
         c.autoSprint = true; c.lowArmorAlert = true; c.potionExpiryAlert = true;
         c.deathCoords = true; c.autoDeathWaypoint = true;
+        c.pearlTimer = true; c.pearlTrajectory = true; c.trapPlastPreview = true;
         c.crosshairStyle = 0; c.crosshairSize = 4; c.crosshairGap = 2; c.crosshairThickness = 1;
         c.crosshairOutline = true; c.crosshairDynamic = true; c.crosshairColor = 0xFFE8E8F4;
         c.save();
@@ -265,7 +266,11 @@ public final class HudManager {
         return (mc != null && mc.getWindow() != null) ? mc.getWindow().getScaledHeight() : 240;
     }
 
-    // 1. Верхняя панель по центру (Ник | FPS | Ping | Время)
+    private static String keyTitle(int keyCode) {
+        if (keyCode <= 0) return "НЕТ";
+        return InputUtil.Type.KEYSYM.createFromCode(keyCode).getLocalizedText().getString().toUpperCase();
+    }
+
     static class TopBarElement extends HudElement {
         TopBarElement() { super("server"); }
         @Override public boolean isEnabled(ArtemConfig c) { return c.showServer; }
@@ -322,7 +327,6 @@ public final class HudManager {
         @Override protected int defaultY() { return 6; }
     }
 
-    // Таймер ивента (под верхней панелью)
     static class EventTimerElement extends HudElement {
         EventTimerElement() { super("event_timer"); }
         @Override public boolean isEnabled(ArtemConfig c) {
@@ -343,7 +347,6 @@ public final class HudManager {
         @Override protected int defaultY() { return 21; }
     }
 
-    // 2. Мини-инвентарь в верхнем левом углу
     static class InventoryElement extends HudElement {
         InventoryElement() { super("inventory"); }
         @Override public boolean isEnabled(ArtemConfig c) { return c.showInventory; }
@@ -391,7 +394,6 @@ public final class HudManager {
         @Override protected int defaultY() { return 6; }
     }
 
-    // 3. Эффекты зелий (слева под инвентарём)
     static class PotionsElement extends HudElement {
         PotionsElement() { super("potions"); }
         @Override public boolean isEnabled(ArtemConfig c) { return c.showPotions; }
@@ -449,7 +451,6 @@ public final class HudManager {
         @Override protected int defaultY() { return 52; }
     }
 
-    // Виджет кулдаунов предметов (Хелпер)
     static class CooldownsElement extends HudElement {
         private static final Object[][] TRACKED = {
                 {Items.ENDER_PEARL, "Жемчуг"},
@@ -527,7 +528,6 @@ public final class HudManager {
         @Override protected int defaultY() { return 142; }
     }
 
-    // 4. Keybinds (слева по центру)
     static class HotKeysElement extends HudElement {
         HotKeysElement() { super("hotkeys"); }
         @Override public boolean isEnabled(ArtemConfig c) { return c.showHotKeys; }
@@ -537,12 +537,12 @@ public final class HudManager {
         private List<String[]> binds(ArtemConfig c) {
             List<String[]> list = new ArrayList<>();
             list.add(new String[]{"ClickGUI", "RSHIFT"});
+            if (c.ahOpenKeyCode > 0) list.add(new String[]{"Auction /ah", keyTitle(c.ahOpenKeyCode)});
+            if (c.ahSearchHandItem && c.ahSearchKeyCode > 0) list.add(new String[]{"AH Search", keyTitle(c.ahSearchKeyCode)});
             list.add(new String[]{"Zoom", "C"});
-            if (c.ahSearchHandItem) list.add(new String[]{"AH Search", "H"});
             for (Map.Entry<String, Integer> e : c.keybinds.entrySet()) {
                 if (e.getValue() != null && e.getValue() > 0) {
-                    String keyName = InputUtil.Type.KEYSYM.createFromCode(e.getValue()).getLocalizedText().getString().toUpperCase();
-                    list.add(new String[]{e.getKey(), keyName});
+                    list.add(new String[]{e.getKey(), keyTitle(e.getValue())});
                 }
             }
             return list;
@@ -573,7 +573,6 @@ public final class HudManager {
         @Override protected int defaultY() { return 96; }
     }
 
-    // 5. Мини-моделька игрока в левом нижнем углу
     static class PaperdollElement extends HudElement {
         PaperdollElement() { super("paperdoll"); }
         @Override public boolean isEnabled(ArtemConfig c) { return c.showPaperdoll; }
@@ -605,7 +604,6 @@ public final class HudManager {
         @Override protected int defaultY() { return Math.max(120, screenH() - 56); }
     }
 
-    // 6. TargetHUD (в верхнем правом углу + подсветка друзей)
     static class TargetHudElement extends HudElement {
         private float smoothHp = 20f;
         TargetHudElement() { super("target"); }
@@ -670,7 +668,6 @@ public final class HudManager {
         @Override protected int defaultY() { return 6; }
     }
 
-    // 7. Броня с реальной прочностью
     static class ArmorElement extends HudElement {
         ArmorElement() { super("armor"); }
         @Override public boolean isEnabled(ArtemConfig c) { return c.showArmor; }
@@ -745,6 +742,8 @@ public final class HudManager {
         private List<String> mods(ArtemConfig c) {
             List<String> l = new ArrayList<>();
             if (c.autoSprint) l.add("AutoSprint");
+            if (c.pearlTimer) l.add("PearlTimer");
+            if (c.trapPlastPreview) l.add("TrapPreview");
             if (c.smallSword) l.add("SmallSword");
             if (c.esp) l.add("ESP"); if (c.playerHighlight) l.add("PlayerHighlight");
             if (c.tracers) l.add("Tracers"); if (c.chams) l.add("Chams");
@@ -983,3 +982,4 @@ public final class HudManager {
         @Override protected int defaultX() { return screenW() - 96; } @Override protected int defaultY() { return screenH() - 70; }
     }
 }
+// === КОНЕЦ ФАЙЛА ===
