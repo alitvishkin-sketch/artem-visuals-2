@@ -291,11 +291,6 @@ public final class HudManager {
         return e != null ? e.getLatency() : -1;
     }
 
-    // ——— HUD Виджеты (чёткие координаты без наложений) ———
-
-    /**
-     * 1. Верхняя центральная пилюля как в PulseVisual: [Волна] artemvisuals.pro | 56 ms | 171 FPS
-     */
     static class TopBarElement extends HudElement {
         TopBarElement() { super("server"); }
         @Override public boolean isEnabled(ArtemConfig c) { return c.showServer; }
@@ -369,4 +364,134 @@ public final class HudManager {
         protected int defaultX() {
             MinecraftClient mc = MinecraftClient.getInstance();
             if (mc == null || mc.getWindow() == null) return 120;
-            measure(
+            measure(mc);
+            return (mc.getWindow().getScaledWidth() - width) / 2;
+        }
+
+        @Override protected int defaultY() { return 6; }
+    }
+
+    static class HotKeysElement extends HudElement {
+        HotKeysElement() { super("hotkeys"); }
+        @Override public boolean isEnabled(ArtemConfig c) { return c.showHotKeys; }
+        @Override public String getText(MinecraftClient mc) { return "Hot Keys"; }
+        @Override public int getColor(MinecraftClient mc) { return NeonButton.ACCENT_BRIGHT; }
+
+        private List<String[]> activeBinds(ArtemConfig c) {
+            List<String[]> list = new ArrayList<>();
+            list.add(new String[]{"ClickGUI", "RSHIFT"});
+            if (c.jumpCircle) list.add(new String[]{"Jump Circle", "ON"});
+            if (c.targetEsp) list.add(new String[]{"Target ESP", "ON"});
+            if (c.trails) list.add(new String[]{"Trails", "ON"});
+            return list;
+        }
+
+        @Override
+        protected void measure(MinecraftClient mc) {
+            List<String[]> binds = activeBinds(ArtemConfig.get());
+            width = 104;
+            height = 18 + Math.min(3, binds.size()) * 11;
+        }
+
+        @Override
+        protected void renderBody(DrawContext ctx, MinecraftClient mc, ArtemConfig c, int x, int y) {
+            List<String[]> binds = activeBinds(c);
+            NeonButton.fillGradientRounded(ctx, x, y, width, height, 5, NeonButton.WINDOW_TOP, NeonButton.WINDOW_BOTTOM);
+            NeonButton.drawSmoothRoundedOutline(ctx, x, y, width, height, 5, 0x1EFFFFFF);
+
+            NeonButton.fillSmoothRounded(ctx, x + 6, y + 5, 7, 6, 1, NeonButton.ACCENT_BRIGHT);
+            ctx.drawText(mc.textRenderer, "Hot Keys", x + 17, y + 4, 0xFFE8E8F4, false);
+
+            int ry = y + 17;
+            for (int i = 0; i < Math.min(3, binds.size()); i++) {
+                String[] b = binds.get(i);
+                ctx.drawText(mc.textRenderer, b[0], x + 7, ry, 0xFFCCCCE0, false);
+                int kw = mc.textRenderer.getWidth(b[1]);
+                ctx.drawText(mc.textRenderer, b[1], x + width - kw - 7, ry, 0xFF8E8EA8, false);
+                ry += 11;
+            }
+        }
+
+        @Override protected int defaultX() { return 6; }
+        @Override protected int defaultY() { return 6; }
+    }
+
+    static class TargetHudElement extends HudElement {
+        private float smoothHp = 20f;
+
+        TargetHudElement() { super("target"); }
+        @Override public boolean isEnabled(ArtemConfig c) { return c.showTargetHud; }
+        @Override public String getText(MinecraftClient mc) { return "TargetHUD"; }
+        @Override public int getColor(MinecraftClient mc) { return NeonButton.ACCENT; }
+
+        private LivingEntity resolveTarget(MinecraftClient mc, ArtemConfig c) {
+            if (mc.targetedEntity instanceof LivingEntity le && le.isAlive()) return le;
+            if (mc.player != null) {
+                LivingEntity last = mc.player.getAttacking();
+                if (last != null && last.isAlive() && (mc.player.age - mc.player.getLastAttackTime() < 80)) {
+                    return last;
+                }
+                if (c.hudEditMode) return mc.player;
+            }
+            return null;
+        }
+
+        @Override
+        protected void measure(MinecraftClient mc) {
+            LivingEntity target = resolveTarget(mc, ArtemConfig.get());
+            if (target == null) {
+                width = 0;
+                height = 0;
+                return;
+            }
+            width = 118;
+            height = 28;
+        }
+
+        @Override
+        protected void renderBody(DrawContext ctx, MinecraftClient mc, ArtemConfig c, int x, int y) {
+            LivingEntity target = resolveTarget(mc, c);
+            if (target == null) return;
+
+            float hp = Math.max(0f, target.getHealth());
+            float maxHp = Math.max(1f, target.getMaxHealth());
+            smoothHp += (hp - smoothHp) * 0.25f;
+            float ratio = Math.min(1f, Math.max(0f, smoothHp / maxHp));
+
+            NeonButton.fillGradientRounded(ctx, x, y, width, height, 5, NeonButton.WINDOW_TOP, NeonButton.WINDOW_BOTTOM);
+            NeonButton.drawSmoothRoundedOutline(ctx, x, y, width, height, 5, 0x22FFFFFF);
+
+            int avSize = 20;
+            int ax = x + 4;
+            int ay = y + 4;
+            NeonButton.fillSmoothRounded(ctx, ax, ay, avSize, avSize, 3, 0xFF1A1A28);
+
+            String name = target.getName().getString();
+            if (target instanceof AbstractClientPlayerEntity player) {
+                PlayerSkinDrawer.draw(ctx, player.getSkinTextures().texture(), ax + 1, ay + 1, avSize - 2);
+            } else {
+                String initial = name.isEmpty() ? "?" : name.substring(0, 1).toUpperCase();
+                ctx.drawText(mc.textRenderer, initial, ax + 7, ay + 6, NeonButton.ACCENT_BRIGHT, false);
+            }
+
+            if (name.length() > 14) name = name.substring(0, 13) + "…";
+            int tx = ax + avSize + 6;
+            ctx.drawText(mc.textRenderer, name, tx, y + 4, 0xFFF2F2FA, false);
+
+            String hpStr = String.format("HP / %.1f", hp);
+            ctx.drawText(mc.textRenderer, hpStr, tx, y + 14, 0xFF8E8EA6, false);
+
+            int barX = tx;
+            int barY = y + 23;
+            int barW = width - (tx - x) - 5;
+            int barH = 2;
+            NeonButton.fillSmoothRounded(ctx, barX, barY, barW, barH, 1, 0xFF222232);
+            int fillW = Math.round(barW * ratio);
+            if (fillW > 1) {
+                NeonButton.fillGradientRounded(ctx, barX, barY, fillW, barH, 1, NeonButton.ACCENT, NeonButton.ACCENT_BRIGHT);
+            }
+        }
+
+        @Override
+        protected int defaultX() {
+            MinecraftClient
