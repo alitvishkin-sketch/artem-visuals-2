@@ -1,7 +1,7 @@
 package com.artem.visuals.effects;
 
 import com.artem.visuals.config.ArtemConfig;
-import net.fabricmc.fabric.api.client.player.ClientPlayerBlockBreakEvents;
+import net.fabricmc.fabric.api.event.client.player.ClientPlayerBlockBreakEvents;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
 import net.minecraft.block.LeavesBlock;
