@@ -5,53 +5,106 @@ import com.artem.visuals.hud.HudManager;
 import com.artem.visuals.optimize.Optimizer;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.DrawContext;
+import net.minecraft.client.gui.PlayerSkinDrawer;
 import net.minecraft.client.gui.screen.Screen;
+import net.minecraft.client.network.AbstractClientPlayerEntity;
 import net.minecraft.text.Text;
+import org.lwjgl.glfw.GLFW;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.function.BooleanSupplier;
 import java.util.function.DoubleConsumer;
 import java.util.function.DoubleSupplier;
 import java.util.function.IntConsumer;
 import java.util.function.IntSupplier;
+import java.util.function.Supplier;
 
 public class ArtemScreen extends Screen {
-    private enum Tab {
-        VISUALS("Visuals"),
-        HUD("HUD"),
-        SWORD("Sword & View"),
-        WORLD("World & Theme");
+    private enum Category {
+        VISUALS("Визуалы", "Основные", false),
+        HUD("Интерфейс", "Основные", false),
+        SWORD("Меч и Камера", "Основные", false),
+        OPTIMIZE("Оптимизация", "Основные", true),
+        WORLD("Мир и Время", "Остальные", false),
+        CONFIGS("Конфиги", "Остальные", false),
+        THEMES("Темы", "Остальные", false);
 
         final String title;
-        Tab(String title) { this.title = title; }
+        final String group;
+        final boolean badge;
+
+        Category(String title, String group, boolean badge) {
+            this.title = title;
+            this.group = group;
+            this.badge = badge;
+        }
     }
 
-    private sealed interface SubItem permits SubToggle, SubSlider, SubSwatches {}
+    private sealed interface RowItem permits ToggleRow, SliderRow, SwatchRow, ActionRow {}
 
-    private record SubToggle(String label, BooleanSupplier getter, Runnable toggler) implements SubItem {}
-    private record SubSlider(String label, double min, double max, boolean integer, DoubleSupplier getter, DoubleConsumer setter) implements SubItem {}
-    private record SubSwatches(String label, int[] palette, IntSupplier getter, IntConsumer setter) implements SubItem {}
+    private record ToggleRow(
+            String label,
+            Category category,
+            BooleanSupplier getter,
+            Runnable toggler,
+            Runnable onSettings
+    ) implements RowItem {}
+
+    private record SliderRow(
+            String label,
+            Category category,
+            double min,
+            double max,
+            boolean integer,
+            DoubleSupplier getter,
+            DoubleConsumer setter
+    ) implements RowItem {}
+
+    private record SwatchRow(
+            String label,
+            Category category,
+            int[] palette,
+            IntSupplier getter,
+            IntConsumer setter
+    ) implements RowItem {}
+
+    private record ActionRow(
+            String label,
+            Category category,
+            Supplier<String> badgeText,
+            Runnable action
+    ) implements RowItem {}
 
     private static final int[] ACCENT_PALETTE = {
-            0xFF8A7CFF, 0xFF00F5FF, 0xFFFF4D8D, 0xFF2EC4B6,
-            0xFFFFB703, 0xFFFF595E, 0xFF6BCB77, 0xFFFFFFFF
+            0xFFA594F9, 0xFF8A7CFF, 0xFF00F5FF, 0xFFFF6B9D,
+            0xFF2EC4B6, 0xFFFFB703, 0xFF6BCB77, 0xFFF2F2FA
     };
 
     private static final int[] BG_PALETTE = {
-            0x101018, 0x0A101E, 0x160C1E, 0x0A1916,
-            0x1C0C12, 0x050507
+            0x101018, 0x0C1220, 0x180E22, 0x0B1A17,
+            0x1D0E14, 0x08080C
     };
 
     private final Screen parent;
-    private Tab currentTab = Tab.VISUALS;
+    private Category activeCategory = Category.VISUALS;
+    private String searchQuery = "";
+    private boolean searchFocused = false;
+    private String statusToast = "";
+    private long statusToastUntil = 0L;
+
+    private String subDetailTitle = null;
+    private final List<RowItem> subDetailRows = new ArrayList<>();
+
     private int scrollOffset = 0;
     private int maxScroll = 0;
-
-    private String subTitle = null;
-    private final List<SubItem> subItems = new ArrayList<>();
+    private SliderRow draggingSlider = null;
+    private int draggingSliderX = 0;
+    private int draggingSliderW = 1;
 
     private int winX, winY, winW, winH;
+    private int sideW, mainX, mainW, listX, listY, listW, listH;
 
     public ArtemScreen(Screen parent) {
         super(Text.literal("Artem Visuals"));
@@ -60,334 +113,222 @@ public class ArtemScreen extends Screen {
 
     @Override
     protected void init() {
-        clearChildren();
         NeonButton.syncTheme();
         ArtemConfig c = ArtemConfig.get();
+        float s = Math.max(0.75f, Math.min(1.15f, c.guiScale));
 
-        float s = Math.max(0.70f, Math.min(1.15f, c.guiScale));
-        winW = Math.min(width - 16, Math.round(336 * s));
-        winH = Math.min(height - 16, Math.round(212 * s));
+        winW = Math.min(width - 20, Math.round(396 * s));
+        winH = Math.min(height - 20, Math.round(248 * s));
         winX = (width - winW) / 2;
         winY = (height - winH) / 2;
 
-        int dockX = winX + 6;
-        int dockY = winY + 26;
-        Tab[] tabs = Tab.values();
-        for (int i = 0; i < tabs.length; i++) {
-            final Tab tab = tabs[i];
-            addDrawableChild(new NeonButton(
-                    dockX, dockY + i * 24, 20, 20,
-                    () -> tab.title,
-                    () -> currentTab == tab,
-                    () -> {
-                        currentTab = tab;
-                        scrollOffset = 0;
-                        subTitle = null;
-                        subItems.clear();
-                        init();
-                    },
-                    NeonButton.Style.DOCK_ICON,
-                    i
-            ));
-        }
+        sideW = Math.round(108 * s);
+        mainX = winX + sideW;
+        mainW = winW - sideW;
 
-        addDrawableChild(new NeonButton(
-                winX + winW - 20, winY + 5, 14, 14,
-                () -> "X", null,
-                () -> close(),
-                NeonButton.Style.CLOSE_ICON
-        ));
-
-        buildTabContent(c);
+        listX = mainX + 10;
+        listY = winY + 42;
+        listW = mainW - 20;
+        listH = winH - 50;
     }
 
-    private void openSubPanel(String title, List<SubItem> items) {
-        this.subTitle = title;
-        this.subItems.clear();
-        this.subItems.addAll(items);
-        init();
+    private void toast(String msg) {
+        this.statusToast = msg;
+        this.statusToastUntil = System.currentTimeMillis() + 2200L;
     }
 
-    private void buildTabContent(ArtemConfig c) {
-        int contentX = winX + 32;
-        int contentY = winY + 25;
-        int subW = (subTitle != null && !subItems.isEmpty()) ? 112 : 0;
-        int contentW = winW - 38 - (subW > 0 ? subW + 6 : 0);
-        int contentH = winH - 31;
+    private void openSubDetails(String title, List<RowItem> rows) {
+        this.subDetailTitle = title;
+        this.subDetailRows.clear();
+        this.subDetailRows.addAll(rows);
+        this.scrollOffset = 0;
+    }
 
-        List<NeonButton> items = new ArrayList<>();
-        int colW = (contentW - 6) / 2;
+    private List<RowItem> buildAllRows(ArtemConfig c) {
+        List<RowItem> all = new ArrayList<>();
 
-        switch (currentTab) {
-            case VISUALS -> {
-                items.add(toggleCard("Target ESP (ПКМ)", () -> c.targetEsp, () -> { c.targetEsp = !c.targetEsp; c.save(); },
-                        () -> openSubPanel("Target ESP", List.of(
-                                new SubSwatches("Цвет", ACCENT_PALETTE, () -> c.targetEspColor, col -> { c.targetEspColor = col; c.save(); }),
-                                new SubSlider("Скорость", 0.3, 2.5, false, () -> c.targetEspSpeed, v -> { c.targetEspSpeed = (float) v; c.save(); })
-                        ))));
-                items.add(toggleCard("Jump Circle (ПКМ)", () -> c.jumpCircle, () -> { c.jumpCircle = !c.jumpCircle; c.save(); },
-                        () -> openSubPanel("Jump Circle", List.of(
-                                new SubSwatches("Цвет", ACCENT_PALETTE, () -> c.jumpCircleColor, col -> { c.jumpCircleColor = col; c.save(); }),
-                                new SubSlider("Радиус", 0.5, 2.5, false, () -> c.jumpCircleRadius, v -> { c.jumpCircleRadius = (float) v; c.save(); })
-                        ))));
-                items.add(toggleCard("Trails (ПКМ)", () -> c.trails, () -> { c.trails = !c.trails; c.save(); },
-                        () -> openSubPanel("Trails", List.of(
-                                new SubSwatches("Цвет", ACCENT_PALETTE, () -> c.trailColor, col -> { c.trailColor = col; c.save(); }),
-                                new SubSlider("Длина", 8, 60, true, () -> c.trailLength, v -> { c.trailLength = (int) v; c.save(); })
-                        ))));
-                items.add(toggleCard("Nimb (ПКМ)", () -> c.nimb, () -> { c.nimb = !c.nimb; c.save(); },
-                        () -> openSubPanel("Nimb", List.of(
-                                new SubSwatches("Цвет", ACCENT_PALETTE, () -> c.nimbColor, col -> { c.nimbColor = col; c.save(); }),
-                                new SubSlider("Размер", 0.2, 0.7, false, () -> c.nimbSize, v -> { c.nimbSize = (float) v; c.save(); })
-                        ))));
-                items.add(toggleCard("NameTags (ПКМ)", () -> c.nameTags, () -> { c.nameTags = !c.nameTags; c.save(); },
-                        () -> openSubPanel("NameTags", List.of(
-                                new SubToggle("Здоровье", () -> c.nameTagsHealth, () -> { c.nameTagsHealth = !c.nameTagsHealth; c.save(); }),
-                                new SubToggle("Дистанция", () -> c.nameTagsDistance, () -> { c.nameTagsDistance = !c.nameTagsDistance; c.save(); })
-                        ))));
-                items.add(toggleCard("Hit Particles", () -> c.hitParticles, () -> { c.hitParticles = !c.hitParticles; c.save(); }, null));
-                items.add(toggleCard("Crit Sparks", () -> c.critSparks, () -> { c.critSparks = !c.critSparks; c.save(); }, null));
-                items.add(toggleCard("Damage Indicator", () -> c.damageIndicator, () -> { c.damageIndicator = !c.damageIndicator; c.save(); }, null));
-                items.add(toggleCard("Projectile Trails", () -> c.projectileTrails, () -> { c.projectileTrails = !c.projectileTrails; c.save(); }, null));
-                items.add(toggleCard("Block Overlay", () -> c.blockOverlay, () -> { c.blockOverlay = !c.blockOverlay; c.save(); }, null));
-                items.add(toggleCard("Player ESP (ПКМ)", () -> c.esp, () -> { c.esp = !c.esp; c.save(); },
-                        () -> openSubPanel("Player ESP", List.of(
-                                new SubSwatches("Цвет", ACCENT_PALETTE, () -> c.espColor, col -> { c.espColor = col; c.save(); }),
-                                new SubToggle("Пульсация", () -> c.espPulse, () -> { c.espPulse = !c.espPulse; c.save(); })
-                        ))));
-                items.add(toggleCard("Chams", () -> c.chams, () -> { c.chams = !c.chams; c.save(); }, null));
-                items.add(toggleCard("Tracers", () -> c.tracers, () -> { c.tracers = !c.tracers; c.save(); }, null));
-                items.add(toggleCard("Item ESP", () -> c.itemEsp, () -> { c.itemEsp = !c.itemEsp; c.save(); }, null));
+        // --- ВИЗУАЛЫ ---
+        all.add(new ToggleRow("Target ESP", Category.VISUALS, () -> c.targetEsp,
+                () -> { c.targetEsp = !c.targetEsp; c.save(); },
+                () -> openSubDetails("Target ESP", List.of(
+                        new SwatchRow("Цвет кольца", Category.VISUALS, ACCENT_PALETTE, () -> c.targetEspColor, v -> { c.targetEspColor = v; c.save(); }),
+                        new SliderRow("Скорость вращения", Category.VISUALS, 0.3, 2.5, false, () -> c.targetEspSpeed, v -> { c.targetEspSpeed = (float) v; c.save(); })
+                ))));
+        all.add(new ToggleRow("Jump Circle", Category.VISUALS, () -> c.jumpCircle,
+                () -> { c.jumpCircle = !c.jumpCircle; c.save(); },
+                () -> openSubDetails("Jump Circle", List.of(
+                        new SwatchRow("Цвет круга", Category.VISUALS, ACCENT_PALETTE, () -> c.jumpCircleColor, v -> { c.jumpCircleColor = v; c.save(); }),
+                        new SliderRow("Радиус волны", Category.VISUALS, 0.5, 2.5, false, () -> c.jumpCircleRadius, v -> { c.jumpCircleRadius = (float) v; c.save(); })
+                ))));
+        all.add(new ToggleRow("Trails (Шлейф)", Category.VISUALS, () -> c.trails,
+                () -> { c.trails = !c.trails; c.save(); },
+                () -> openSubDetails("Trails", List.of(
+                        new SwatchRow("Цвет шлейфа", Category.VISUALS, ACCENT_PALETTE, () -> c.trailColor, v -> { c.trailColor = v; c.save(); }),
+                        new SliderRow("Длина шлейфа", Category.VISUALS, 8, 60, true, () -> c.trailLength, v -> { c.trailLength = (int) v; c.save(); })
+                ))));
+        all.add(new ToggleRow("Nimb (Нимб)", Category.VISUALS, () -> c.nimb,
+                () -> { c.nimb = !c.nimb; c.save(); },
+                () -> openSubDetails("Nimb", List.of(
+                        new SwatchRow("Цвет нимба", Category.VISUALS, ACCENT_PALETTE, () -> c.nimbColor, v -> { c.nimbColor = v; c.save(); }),
+                        new SliderRow("Размер нимба", Category.VISUALS, 0.2, 0.7, false, () -> c.nimbSize, v -> { c.nimbSize = (float) v; c.save(); })
+                ))));
+        all.add(new ToggleRow("NameTags", Category.VISUALS, () -> c.nameTags,
+                () -> { c.nameTags = !c.nameTags; c.save(); },
+                () -> openSubDetails("NameTags", List.of(
+                        new ToggleRow("Показывать здоровье", Category.VISUALS, () -> c.nameTagsHealth, () -> { c.nameTagsHealth = !c.nameTagsHealth; c.save(); }, null),
+                        new ToggleRow("Показывать дистанцию", Category.VISUALS, () -> c.nameTagsDistance, () -> { c.nameTagsDistance = !c.nameTagsDistance; c.save(); }, null)
+                ))));
+        all.add(new ToggleRow("Hit Particles (Частицы удара)", Category.VISUALS, () -> c.hitParticles,
+                () -> { c.hitParticles = !c.hitParticles; c.save(); },
+                () -> openSubDetails("Hit Particles", List.of(
+                        new SliderRow("Количество частиц", Category.VISUALS, 4, 32, true, () -> c.hitParticlesCount, v -> { c.hitParticlesCount = (int) v; c.save(); })
+                ))));
+        all.add(new ToggleRow("Crit Sparks (Искры критов)", Category.VISUALS, () -> c.critSparks, () -> { c.critSparks = !c.critSparks; c.save(); }, null));
+        all.add(new ToggleRow("Damage Indicator", Category.VISUALS, () -> c.damageIndicator, () -> { c.damageIndicator = !c.damageIndicator; c.save(); }, null));
+        all.add(new ToggleRow("Projectile Trails (След стрел)", Category.VISUALS, () -> c.projectileTrails, () -> { c.projectileTrails = !c.projectileTrails; c.save(); }, null));
+        all.add(new ToggleRow("Block Overlay (Обводка блока)", Category.VISUALS, () -> c.blockOverlay,
+                () -> { c.blockOverlay = !c.blockOverlay; c.save(); },
+                () -> openSubDetails("Block Overlay", List.of(
+                        new SwatchRow("Цвет обводки", Category.VISUALS, ACCENT_PALETTE, () -> c.blockOverlayColor, v -> { c.blockOverlayColor = v; c.save(); }),
+                        new SliderRow("Прозрачность", Category.VISUALS, 0.2, 1.0, false, () -> c.blockOverlayAlpha, v -> { c.blockOverlayAlpha = (float) v; c.save(); })
+                ))));
+        all.add(new ToggleRow("Player ESP", Category.VISUALS, () -> c.esp,
+                () -> { c.esp = !c.esp; c.save(); },
+                () -> openSubDetails("Player ESP", List.of(
+                        new SwatchRow("Цвет ESP", Category.VISUALS, ACCENT_PALETTE, () -> c.espColor, v -> { c.espColor = v; c.save(); }),
+                        new ToggleRow("Пульсация", Category.VISUALS, () -> c.espPulse, () -> { c.espPulse = !c.espPulse; c.save(); }, null)
+                ))));
+        all.add(new ToggleRow("Chams", Category.VISUALS, () -> c.chams, () -> { c.chams = !c.chams; c.save(); }, null));
+        all.add(new ToggleRow("Tracers", Category.VISUALS, () -> c.tracers, () -> { c.tracers = !c.tracers; c.save(); }, null));
+        all.add(new ToggleRow("Item ESP", Category.VISUALS, () -> c.itemEsp, () -> { c.itemEsp = !c.itemEsp; c.save(); }, null));
+
+        // --- ИНТЕРФЕЙС (HUD) ---
+        all.add(new ToggleRow("Режим перемещения HUD", Category.HUD, () -> c.hudEditMode, () -> { c.hudEditMode = !c.hudEditMode; c.save(); }, null));
+        all.add(new SliderRow("Масштаб элементов HUD", Category.HUD, 0.50, 1.20, false, () -> c.hudScale, v -> { c.hudScale = (float) v; c.save(); }));
+        all.add(new ToggleRow("Верхняя панель (Ник/FPS/Время)", Category.HUD, () -> c.showServer, () -> { c.showServer = !c.showServer; c.save(); }, null));
+        all.add(new ToggleRow("Мини-инвентарь (Inventory)", Category.HUD, () -> c.showInventory, () -> { c.showInventory = !c.showInventory; c.save(); }, null));
+        all.add(new ToggleRow("Эффекты зелий (Potions)", Category.HUD, () -> c.showPotions, () -> { c.showPotions = !c.showPotions; c.save(); }, null));
+        all.add(new ToggleRow("Горячие клавиши (Keybinds)", Category.HUD, () -> c.showHotKeys, () -> { c.showHotKeys = !c.showHotKeys; c.save(); }, null));
+        all.add(new ToggleRow("Моделька игрока (Paperdoll)", Category.HUD, () -> c.showPaperdoll, () -> { c.showPaperdoll = !c.showPaperdoll; c.save(); }, null));
+        all.add(new ToggleRow("TargetHUD", Category.HUD, () -> c.showTargetHud, () -> { c.showTargetHud = !c.showTargetHud; c.save(); }, null));
+        all.add(new ToggleRow("Броня с прочностью (Armor)", Category.HUD, () -> c.showArmor, () -> { c.showArmor = !c.showArmor; c.save(); }, null));
+        all.add(new ToggleRow("Проценты прочности брони", Category.HUD, () -> c.armorDurabilityPercent, () -> { c.armorDurabilityPercent = !c.armorDurabilityPercent; c.save(); }, null));
+        all.add(new ToggleRow("Список модулей (ArrayList)", Category.HUD, () -> c.showArrayList, () -> { c.showArrayList = !c.showArrayList; c.save(); }, null));
+        all.add(new ToggleRow("Нажатия клавиш (Keystrokes)", Category.HUD, () -> c.showKeystrokes, () -> { c.showKeystrokes = !c.showKeystrokes; c.save(); }, null));
+        all.add(new ToggleRow("Радар сущностей (Radar)", Category.HUD, () -> c.showRadar, () -> { c.showRadar = !c.showRadar; c.save(); }, null));
+        all.add(new ToggleRow("Мини-карта (MiniMap)", Category.HUD, () -> c.showMinimap, () -> { c.showMinimap = !c.showMinimap; c.save(); }, null));
+        all.add(new ToggleRow("Координаты XYZ", Category.HUD, () -> c.showXyz, () -> { c.showXyz = !c.showXyz; c.save(); }, null));
+        all.add(new ToggleRow("Скорость (BPS)", Category.HUD, () -> c.showSpeed, () -> { c.showSpeed = !c.showSpeed; c.save(); }, null));
+        all.add(new ToggleRow("Счётчик кликов (CPS)", Category.HUD, () -> c.showCps, () -> { c.showCps = !c.showCps; c.save(); }, null));
+        all.add(new ActionRow("Сбросить позиции HUD", Category.HUD, () -> "Сброс", () -> {
+            c.hudPositions.clear();
+            c.save();
+            toast("Позиции HUD сброшены");
+        }));
+
+        // --- МЕЧ И КАМЕРА ---
+        all.add(new ToggleRow("Маленький меч (SmallSword)", Category.SWORD, () -> c.smallSword, () -> { c.smallSword = !c.smallSword; c.save(); }, null));
+        all.add(new ToggleRow("Уменьшать только оружие", Category.SWORD, () -> c.onlyWeapons, () -> { c.onlyWeapons = !c.onlyWeapons; c.save(); }, null));
+        all.add(new SliderRow("Размер предмета в руке", Category.SWORD, 0.25, 1.25, false, () -> c.swordScale, v -> { c.swordScale = (float) v; c.save(); }));
+        all.add(new SliderRow("Смещение по X", Category.SWORD, -0.40, 0.40, false, () -> c.swordOffsetX, v -> { c.swordOffsetX = (float) v; c.save(); }));
+        all.add(new SliderRow("Смещение по Y", Category.SWORD, -0.40, 0.40, false, () -> c.swordOffsetY, v -> { c.swordOffsetY = (float) v; c.save(); }));
+        all.add(new SliderRow("Смещение по Z", Category.SWORD, -0.40, 0.40, false, () -> c.swordOffsetZ, v -> { c.swordOffsetZ = (float) v; c.save(); }));
+        all.add(new ToggleRow("Свечение предметов в руках", Category.SWORD, () -> c.handGlow, () -> { c.handGlow = !c.handGlow; c.save(); }, null));
+        all.add(new ToggleRow("No HurtCam (Без тряски урона)", Category.SWORD, () -> c.noHurtCam, () -> { c.noHurtCam = !c.noHurtCam; c.save(); }, null));
+        all.add(new ToggleRow("Low Fire (Низкий огонь)", Category.SWORD, () -> c.lowFire, () -> { c.lowFire = !c.lowFire; c.save(); }, null));
+        all.add(new ToggleRow("Мягкая виньетка экрана", Category.SWORD, () -> c.screenVignette, () -> { c.screenVignette = !c.screenVignette; c.save(); }, null));
+        all.add(new ToggleRow("Убрать покачивание камеры", Category.SWORD, () -> c.renderTweaks, () -> { c.renderTweaks = !c.renderTweaks; c.save(); }, null));
+        all.add(new ToggleRow("Кастомный прицел", Category.SWORD, () -> c.customCrosshair, () -> { c.customCrosshair = !c.customCrosshair; c.save(); }, null));
+        all.add(new SwatchRow("Цвет прицела", Category.SWORD, ACCENT_PALETTE, () -> c.crosshairColor, v -> { c.crosshairColor = v; c.save(); }));
+
+        // --- ОПТИМИЗАЦИЯ ---
+        all.add(new ToggleRow("Fullbright (Яркость 100%)", Category.OPTIMIZE, () -> c.softLighting, () -> {
+            c.softLighting = !c.softLighting;
+            c.save();
+            Optimizer.applyLighting(MinecraftClient.getInstance());
+        }, null));
+        all.add(new ToggleRow("Адаптивный FPS лимитер частиц", Category.OPTIMIZE, () -> c.adaptive, () -> { c.adaptive = !c.adaptive; c.save(); }, null));
+        all.add(new ToggleRow("Авто-профиль для FunTime", Category.OPTIMIZE, () -> c.autoFunTime, () -> { c.autoFunTime = !c.autoFunTime; c.save(); }, null));
+        all.add(new ActionRow("Оптимизировать графику (FPS Boost)", Category.OPTIMIZE, () -> "Применить", () -> {
+            Optimizer.applyPerformancePreset(MinecraftClient.getInstance());
+            toast("Настройки FPS применены");
+        }));
+
+        // --- МИР И ВРЕМЯ ---
+        all.add(new ActionRow("Время суток в мире", Category.WORLD, () -> switch (c.worldTimeMode) {
+            case 1 -> "День";
+            case 2 -> "Закат";
+            case 3 -> "Ночь";
+            default -> "Сервер";
+        }, () -> {
+            c.worldCustomizer = true;
+            c.worldTimeMode = (c.worldTimeMode + 1) % 4;
+            c.save();
+        }));
+        all.add(new ToggleRow("Падающая листва", Category.WORLD, () -> c.leafParticles, () -> { c.leafParticles = !c.leafParticles; c.save(); }, null));
+        all.add(new ToggleRow("Ночные светлячки", Category.WORLD, () -> c.fireflies, () -> { c.fireflies = !c.fireflies; c.save(); }, null));
+        all.add(new ToggleRow("Искры на поверхности воды", Category.WORLD, () -> c.waterSparkles, () -> { c.waterSparkles = !c.waterSparkles; c.save(); }, null));
+        all.add(new ToggleRow("Частицы разрушения блоков", Category.WORLD, () -> c.blockBreakEffects, () -> { c.blockBreakEffects = !c.blockBreakEffects; c.save(); }, null));
+        all.add(new ToggleRow("Цветокоррекция экрана", Category.WORLD, () -> c.colorCorrection, () -> { c.colorCorrection = !c.colorCorrection; c.save(); }, null));
+        all.add(new SliderRow("Плотность частиц мира", Category.WORLD, 0, 3, true, () -> c.density, v -> { c.density = (int) v; c.save(); }));
+
+        // --- КОНФИГИ ---
+        all.add(new ActionRow("Пресет Andromeda Visuals", Category.CONFIGS, () -> "Загрузить", () -> {
+            HudManager.applyPulsePreset();
+            toast("Пресет Andromeda загружен");
+        }));
+        all.add(new ActionRow("Пресет FunTime PvP", Category.CONFIGS, () -> "Загрузить", () -> {
+            HudManager.applyFunTimePreset(MinecraftClient.getInstance());
+            toast("Пресет FunTime загружен");
+        }));
+        all.add(new ActionRow("Экспорт конфига в буфер обмена", Category.CONFIGS, () -> "Копировать", () -> {
+            MinecraftClient mc = MinecraftClient.getInstance();
+            if (mc != null && mc.keyboard != null) {
+                mc.keyboard.setClipboard(c.exportBase64());
+                toast("Конфиг скопирован");
             }
-            case HUD -> {
-                items.add(NeonButton.swatches(0, 0, colW, 18, "Цвет HUD", ACCENT_PALETTE,
-                        () -> c.hudAccentColor,
-                        col -> {
-                            c.hudAccentColor = col;
-                            c.hudUseCustomHue = false;
-                            c.hudRainbow = false;
-                            c.save();
-                            NeonButton.syncTheme();
-                        }));
-                items.add(NeonButton.hueSlider(0, 0, colW, 18, "Оттенок HUD",
-                        () -> c.hudHue,
-                        val -> {
-                            c.hudHue = (float) val;
-                            c.hudUseCustomHue = true;
-                            c.hudRainbow = false;
-                            c.save();
-                            NeonButton.syncTheme();
-                        }));
-                items.add(NeonButton.swatches(0, 0, colW, 18, "Фон HUD", BG_PALETTE,
-                        () -> c.hudBgColor,
-                        col -> {
-                            c.hudBgColor = col;
-                            c.save();
-                            NeonButton.syncTheme();
-                        }));
-                items.add(NeonButton.slider(0, 0, colW, 18, "Масштаб HUD", 0.50, 1.20, false,
-                        () -> c.hudScale,
-                        val -> {
-                            c.hudScale = (float) val;
-                            c.save();
-                        }));
-                items.add(toggleCard("RGB Перелив HUD", () -> c.hudRainbow, () -> {
-                    c.hudRainbow = !c.hudRainbow;
-                    c.save();
-                    NeonButton.syncTheme();
-                }, null));
-                items.add(toggleCard("Двигать HUD", () -> c.hudEditMode, () -> {
-                    c.hudEditMode = !c.hudEditMode;
-                    c.save();
-                }, null));
-
-                items.add(new NeonButton(0, 0, colW, 18, () -> "Сброс позиций", null, () -> {
-                    c.hudPositions.clear();
-                    c.save();
-                }));
-                items.add(new NeonButton(0, 0, colW, 18, () -> "Пресет Andromeda", null, HudManager::applyPulsePreset));
-
-                items.add(toggleCard("Top Bar (Время)", () -> c.showServer, () -> { c.showServer = !c.showServer; c.save(); }, null));
-                items.add(toggleCard("Inventory HUD", () -> c.showInventory, () -> { c.showInventory = !c.showInventory; c.save(); }, null));
-                items.add(toggleCard("Potion Effects", () -> c.showPotions, () -> { c.showPotions = !c.showPotions; c.save(); }, null));
-                items.add(toggleCard("Keybinds", () -> c.showHotKeys, () -> { c.showHotKeys = !c.showHotKeys; c.save(); }, null));
-                items.add(toggleCard("Paperdoll (Модель)", () -> c.showPaperdoll, () -> { c.showPaperdoll = !c.showPaperdoll; c.save(); }, null));
-                items.add(toggleCard("TargetHUD", () -> c.showTargetHud, () -> { c.showTargetHud = !c.showTargetHud; c.save(); }, null));
-                items.add(toggleCard("Armor (Броня)", () -> c.showArmor, () -> { c.showArmor = !c.showArmor; c.save(); }, null));
-                items.add(toggleCard("Armor % (Цифры)", () -> c.armorDurabilityPercent, () -> { c.armorDurabilityPercent = !c.armorDurabilityPercent; c.save(); }, null));
-                items.add(toggleCard("ArrayList", () -> c.showArrayList, () -> { c.showArrayList = !c.showArrayList; c.save(); }, null));
-                items.add(toggleCard("Keystrokes", () -> c.showKeystrokes, () -> { c.showKeystrokes = !c.showKeystrokes; c.save(); }, null));
-                items.add(toggleCard("Radar", () -> c.showRadar, () -> { c.showRadar = !c.showRadar; c.save(); }, null));
-                items.add(toggleCard("MiniMap", () -> c.showMinimap, () -> { c.showMinimap = !c.showMinimap; c.save(); }, null));
-                items.add(toggleCard("XYZ", () -> c.showXyz, () -> { c.showXyz = !c.showXyz; c.save(); }, null));
-                items.add(toggleCard("Speed (BPS)", () -> c.showSpeed, () -> { c.showSpeed = !c.showSpeed; c.save(); }, null));
-                items.add(toggleCard("CPS", () -> c.showCps, () -> { c.showCps = !c.showCps; c.save(); }, null));
+        }));
+        all.add(new ActionRow("Импорт конфига из буфера обмена", Category.CONFIGS, () -> "Вставить", () -> {
+            MinecraftClient mc = MinecraftClient.getInstance();
+            if (mc != null && mc.keyboard != null && c.importBase64(mc.keyboard.getClipboard())) {
+                NeonButton.syncTheme();
+                init();
+                toast("Конфиг успешно импортирован");
+            } else {
+                toast("Буфер не содержит конфиг");
             }
-            case SWORD -> {
-                items.add(toggleCard("Маленький меч", () -> c.smallSword, () -> { c.smallSword = !c.smallSword; c.save(); }, null));
-                items.add(toggleCard("Только оружие", () -> c.onlyWeapons, () -> { c.onlyWeapons = !c.onlyWeapons; c.save(); }, null));
-                items.add(NeonButton.slider(0, 0, colW, 18, "Размер меча", 0.25, 1.25, false,
-                        () -> c.swordScale, v -> { c.swordScale = (float) v; c.save(); }));
-                items.add(NeonButton.slider(0, 0, colW, 18, "Сдвиг X", -0.40, 0.40, false,
-                        () -> c.swordOffsetX, v -> { c.swordOffsetX = (float) v; c.save(); }));
-                items.add(NeonButton.slider(0, 0, colW, 18, "Сдвиг Y", -0.40, 0.40, false,
-                        () -> c.swordOffsetY, v -> { c.swordOffsetY = (float) v; c.save(); }));
-                items.add(NeonButton.slider(0, 0, colW, 18, "Сдвиг Z", -0.40, 0.40, false,
-                        () -> c.swordOffsetZ, v -> { c.swordOffsetZ = (float) v; c.save(); }));
-
-                items.add(toggleCard("Hand Aura (Свечение)", () -> c.handGlow, () -> { c.handGlow = !c.handGlow; c.save(); }, null));
-                items.add(toggleCard("No HurtCam", () -> c.noHurtCam, () -> { c.noHurtCam = !c.noHurtCam; c.save(); }, null));
-                items.add(toggleCard("Low Fire", () -> c.lowFire, () -> { c.lowFire = !c.lowFire; c.save(); }, null));
-                items.add(toggleCard("Виньетка экрана", () -> c.screenVignette, () -> { c.screenVignette = !c.screenVignette; c.save(); }, null));
-                items.add(toggleCard("Убрать тряску рук", () -> c.renderTweaks, () -> { c.renderTweaks = !c.renderTweaks; c.save(); }, null));
-                items.add(toggleCard("Кастом прицел", () -> c.customCrosshair, () -> { c.customCrosshair = !c.customCrosshair; c.save(); }, null));
-                items.add(NeonButton.swatches(0, 0, colW, 18, "Цвет прицела", ACCENT_PALETTE,
-                        () -> c.crosshairColor, col -> { c.crosshairColor = col; c.save(); }));
-            }
-            case WORLD -> {
-                items.add(NeonButton.swatches(0, 0, colW, 18, "Цвет темы", ACCENT_PALETTE,
-                        () -> c.clientAccent,
-                        col -> {
-                            c.clientAccent = col;
-                            c.useCustomHue = false;
-                            c.rgbMode = false;
-                            c.save();
-                            NeonButton.syncTheme();
-                        }));
-                items.add(NeonButton.slider(0, 0, colW, 18, "Масштаб меню", 0.70, 1.15, false,
-                        () -> c.guiScale,
-                        v -> {
-                            c.guiScale = (float) v;
-                            c.save();
-                            init();
-                        }));
-                items.add(toggleCard("RGB Тема", () -> c.rgbMode, () -> { c.rgbMode = !c.rgbMode; c.save(); NeonButton.syncTheme(); }, null));
-                items.add(toggleCard("Fullbright", () -> c.softLighting, () -> {
-                    c.softLighting = !c.softLighting;
-                    c.save();
-                    Optimizer.applyLighting(MinecraftClient.getInstance());
-                }, null));
-                items.add(new NeonButton(0, 0, colW, 18, () -> {
-                    String mode = switch (c.worldTimeMode) {
-                        case 1 -> "День";
-                        case 2 -> "Закат";
-                        case 3 -> "Ночь";
-                        default -> "Сервер";
-                    };
-                    return "Время: " + mode;
-                }, null, () -> {
-                    c.worldCustomizer = true;
-                    c.worldTimeMode = (c.worldTimeMode + 1) % 4;
-                    c.save();
-                }));
-                items.add(toggleCard("Листва и частицы", () -> c.leafParticles, () -> { c.leafParticles = !c.leafParticles; c.save(); }, null));
-                items.add(toggleCard("Светлячки", () -> c.fireflies, () -> { c.fireflies = !c.fireflies; c.save(); }, null));
-                items.add(toggleCard("Искры воды", () -> c.waterSparkles, () -> { c.waterSparkles = !c.waterSparkles; c.save(); }, null));
-                items.add(new NeonButton(0, 0, colW, 18, () -> "Пресет FunTime", null, () -> HudManager.applyFunTimePreset(MinecraftClient.getInstance())));
-                items.add(new NeonButton(0, 0, colW, 18, () -> "Сбросить всё", null, () -> {
-                    c.resetDefaults();
-                    NeonButton.syncTheme();
-                    init();
-                }));
-            }
-        }
-
-        int rowH = 21;
-        int totalRows = (items.size() + 1) / 2;
-        int totalH = totalRows * rowH;
-        maxScroll = Math.max(0, totalH - contentH);
-        scrollOffset = Math.max(0, Math.min(maxScroll, scrollOffset));
-
-        for (int i = 0; i < items.size(); i++) {
-            int col = i % 2;
-            int row = i / 2;
-            int bx = contentX + col * (colW + 6);
-            int by = contentY + row * rowH - scrollOffset;
-            NeonButton btn = items.get(i);
-            btn.setX(bx);
-            btn.setY(by);
-            btn.setWidth(colW);
-            btn.visible = (by >= contentY - 4) && (by + btn.getHeight() <= contentY + contentH + 4);
-            addDrawableChild(btn);
-        }
-
-        if (subW > 0) {
-            int sx = winX + winW - subW - 6;
-            int sy = contentY + 16;
-            for (SubItem item : subItems) {
-                if (item instanceof SubToggle st) {
-                    addDrawableChild(new NeonButton(sx + 4, sy, subW - 8, 18, st::label, st.getter(), st.toggler()));
-                    sy += 21;
-                } else if (item instanceof SubSlider sl) {
-                    addDrawableChild(NeonButton.slider(sx + 4, sy, subW - 8, 18, sl.label(), sl.min(), sl.max(), sl.integer(), sl.getter(), sl.setter()));
-                    sy += 21;
-                } else if (item instanceof SubSwatches sw) {
-                    addDrawableChild(NeonButton.swatches(sx + 4, sy, subW - 8, 18, sw.label(), sw.palette(), sw.getter(), sw.setter()));
-                    sy += 21;
-                }
-            }
-        }
-    }
-
-    private NeonButton toggleCard(String name, BooleanSupplier state, Runnable click, Runnable rightClick) {
-        NeonButton b = new NeonButton(0, 0, 120, 18, () -> name, state, click);
-        if (rightClick != null) b.withRightClick(rightClick);
-        return b;
-    }
-
-    @Override
-    public void renderBackground(DrawContext ctx, int mouseX, int mouseY, float delta) {
-        ctx.fill(0, 0, width, height, 0x6606060A);
-    }
-
-    @Override
-    public void render(DrawContext ctx, int mouseX, int mouseY, float delta) {
-        NeonButton.syncTheme();
-        renderBackground(ctx, mouseX, mouseY, delta);
-
-        NeonButton.drawAmbientGlow(ctx, winX, winY, winW, winH, 7, NeonButton.ACCENT, 2);
-        NeonButton.fillGradientRounded(ctx, winX, winY, winW, winH, 7, NeonButton.WINDOW_TOP, NeonButton.WINDOW_BOTTOM);
-        NeonButton.drawSmoothRoundedOutline(ctx, winX, winY, winW, winH, 7, 0x26FFFFFF);
-
-        ctx.fill(winX + 29, winY + 22, winX + 30, winY + winH - 6, 0x18FFFFFF);
-        ctx.fill(winX + 6, winY + 21, winX + winW - 6, winY + 22, 0x18FFFFFF);
-
-        NeonButton.drawCircle(ctx, winX + 12, winY + 12, 3, NeonButton.ACCENT_BRIGHT);
-        NeonButton.drawSmallText(ctx, textRenderer, "ARTEM VISUALS", winX + 19, winY + 8, 0xFFF4F4FC, 0.90f);
-        String sub = " | " + currentTab.title + "  [Zoom: C]";
-        NeonButton.drawSmallText(ctx, textRenderer, sub, winX + 86, winY + 8, NeonButton.ACCENT_BRIGHT, 0.85f);
-
-        if (subTitle != null && !subItems.isEmpty()) {
-            int subW = 112;
-            int sx = winX + winW - subW - 6;
-            int sy = winY + 25;
-            int sh = winH - 31;
-            NeonButton.fillSmoothRounded(ctx, sx, sy, subW, sh, 5, NeonButton.CARD_OFF);
-            NeonButton.drawSmoothRoundedOutline(ctx, sx, sy, subW, sh, 5, (NeonButton.ACCENT & 0x00FFFFFF) | 0x44000000);
-            NeonButton.drawSmallText(ctx, textRenderer, subTitle, sx + 6, sy + 5, NeonButton.ACCENT_BRIGHT, 0.85f);
-        }
-
-        super.render(ctx, mouseX, mouseY, delta);
-    }
-
-    @Override
-    public boolean mouseScrolled(double mouseX, double mouseY, double horizontalAmount, double verticalAmount) {
-        if (maxScroll > 0) {
-            scrollOffset = Math.max(0, Math.min(maxScroll, scrollOffset - (int) (verticalAmount * 14)));
+        }));
+        all.add(new ActionRow("Сбросить все настройки по умолчанию", Category.CONFIGS, () -> "Сбросить", () -> {
+            c.resetDefaults();
+            NeonButton.syncTheme();
             init();
-            return true;
-        }
-        return super.mouseScrolled(mouseX, mouseY, horizontalAmount, verticalAmount);
-    }
+            toast("Настройки сброшены");
+        }));
 
-    @Override
-    public void close() {
-        ArtemConfig.get().save();
-        if (client != null) client.setScreen(parent);
-    }
-
-    @Override
-    public boolean shouldPause() {
-        return false;
-    }
-}
+        // --- ТЕМЫ ---
+        all.add(new SwatchRow("Акцент меню", Category.THEMES, ACCENT_PALETTE, () -> c.clientAccent, col -> {
+            c.clientAccent = col;
+            c.useCustomHue = false;
+            c.rgbMode = false;
+            c.save();
+            NeonButton.syncTheme();
+        }));
+        all.add(new SwatchRow("Акцент HUD", Category.THEMES, ACCENT_PALETTE, () -> c.hudAccentColor, col -> {
+            c.hudAccentColor = col;
+            c.hudUseCustomHue = false;
+            c.hudRainbow = false;
+            c.save();
+            NeonButton.syncTheme();
+        }));
+        all.add(new SwatchRow("Фон плашек HUD", Category.THEMES, BG_PALETTE, () -> c.hudBgColor, col -> {
+            c.hudBgColor = col;
+            c.save();
+            NeonButton.syncTheme();
+        }));
+        all.add(new SliderRow("Масштаб окна меню", Category.THEMES, 0.75, 1.15, false, () -> c.guiScale, v -> {
+            c.guiScale = (float) v;
+            c.save();
+            init();
+        }));
+        all.add(new ToggleRow("RGB перелив меню", Category.THEMES, () -> c.rgbMode, () -> { c.rgbMode = !c.rgbMode; c.save(); NeonButton.syncTheme(); }, null));
+        all.add(new ToggleRow("RGB перелив HUD", Category.THEMES, () -> c.hudRainbow, () -> { c.hudRainbow = !c.hudRainbow; c.save(); NeonButton.syncTheme(); }, null
