@@ -6,12 +6,12 @@ import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.DrawContext;
 
 /**
- * Базовый перетаскиваемый элемент HUD с плавными скруглениями и мягкой тенью PulseVisuals.
+ * Базовый перетаскиваемый элемент HUD с аккуратным мелким шрифтом как на 1-м скриншоте.
  */
 public abstract class HudElement {
     public final String id;
-    protected int width = 52;
-    protected int height = 15;
+    protected int width = 46;
+    protected int height = 13;
     private boolean dragging;
     private int dragOffsetX, dragOffsetY;
 
@@ -25,9 +25,9 @@ public abstract class HudElement {
 
     protected void measure(MinecraftClient mc) {
         String text = getText(mc);
-        int textW = mc.textRenderer.getWidth(text);
-        width = Math.max(42, textW + 14);
-        height = 15;
+        int textW = Math.round(mc.textRenderer.getWidth(text) * 0.80f);
+        width = Math.max(36, textW + 12);
+        height = 13;
     }
 
     public void render(DrawContext ctx, MinecraftClient mc, ArtemConfig c) {
@@ -43,7 +43,7 @@ public abstract class HudElement {
         renderBody(ctx, mc, c, x, y);
 
         if (c.hudEditMode) {
-            int border = dragging ? 0xFF9D8DF7 : 0x887B68EE;
+            int border = dragging ? NeonButton.ACCENT_BRIGHT : ((NeonButton.ACCENT & 0x00FFFFFF) | 0x88000000);
             NeonButton.drawSmoothRoundedOutline(ctx, x, y, width, height, 4, border);
         }
     }
@@ -52,20 +52,18 @@ public abstract class HudElement {
         String text = getText(mc);
         int accentColor = getColor(mc);
 
-        int topBg = dragging ? 0xE61F1E30 : 0xD412121C;
-        int botBg = dragging ? 0xE6161524 : 0xD40B0B12;
-        NeonButton.fillGradientRounded(ctx, x, y, width, height, 4, topBg, botBg);
-        NeonButton.drawSmoothRoundedOutline(ctx, x, y, width, height, 4, 0x24FFFFFF);
+        NeonButton.fillGradientRounded(ctx, x, y, width, height, 4, 0xD811111B, 0xD80A0A11);
+        NeonButton.drawSmoothRoundedOutline(ctx, x, y, width, height, 4, 0x1EFFFFFF);
 
         int spaceIdx = text.indexOf(' ');
         if (spaceIdx > 0 && spaceIdx < text.length() - 1) {
             String key = text.substring(0, spaceIdx);
             String val = text.substring(spaceIdx + 1).trim();
-            ctx.drawText(mc.textRenderer, key, x + 7, y + 4, 0xFF8888A0, false);
-            int keyW = mc.textRenderer.getWidth(key + " ");
-            ctx.drawText(mc.textRenderer, val, x + 7 + keyW, y + 4, accentColor, true);
+            NeonButton.drawSmallText(ctx, mc.textRenderer, key, x + 6, y + 3.5f, 0xFF8888A0, 0.80f);
+            float keyW = mc.textRenderer.getWidth(key + " ") * 0.80f;
+            NeonButton.drawSmallText(ctx, mc.textRenderer, val, x + 6 + keyW, y + 3.5f, accentColor, 0.80f);
         } else {
-            ctx.drawText(mc.textRenderer, text, x + 7, y + 4, accentColor, true);
+            NeonButton.drawSmallText(ctx, mc.textRenderer, text, x + 6, y + 3.5f, accentColor, 0.80f);
         }
     }
 
