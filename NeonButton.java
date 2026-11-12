@@ -1,5 +1,6 @@
 package com.artem.visuals.gui;
 
+import com.artem.visuals.config.ArtemConfig;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.font.TextRenderer;
 import net.minecraft.client.gui.DrawContext;
@@ -7,6 +8,7 @@ import net.minecraft.client.gui.screen.narration.NarrationMessageBuilder;
 import net.minecraft.client.gui.widget.ClickableWidget;
 import net.minecraft.text.Text;
 
+import java.awt.Color;
 import java.util.function.BooleanSupplier;
 import java.util.function.DoubleConsumer;
 import java.util.function.DoubleSupplier;
@@ -15,7 +17,7 @@ import java.util.function.IntSupplier;
 import java.util.function.Supplier;
 
 /**
- * UI-компоненты в стиле PulseVisuals: скруглённые карточки, пилюли-тумблеры, слайдеры и выбор цвета клиента.
+ * UI-компоненты в стиле PulseVisual: скруглённые карточки, пилюли-тумблеры, слайдеры, RGB и выбор цвета.
  */
 public class NeonButton extends ClickableWidget {
     public enum Style {
@@ -48,7 +50,6 @@ public class NeonButton extends ClickableWidget {
     private float hoverAnim = 0f;
     private float toggleAnim = -1f;
 
-    // Динамический акцентный цвет клиента (меняется в World Customizer -> Цвет клиента)
     public static int ACCENT = 0xFF6C5CE7;
     public static int ACCENT_BRIGHT = 0xFF9D8DF7;
     public static final int TEXT = 0xFFE6E6F2;
@@ -70,6 +71,25 @@ public class NeonButton extends ClickableWidget {
         this.action = action;
         this.style = style;
         this.iconIndex = iconIndex;
+    }
+
+    public static void syncTheme() {
+        ArtemConfig c = ArtemConfig.get();
+        if (c.rgbMode) {
+            float hue = ((System.currentTimeMillis() % 4000L) / 4000f * c.rgbSpeed) % 1.0f;
+            int rgb = Color.HSBtoRGB(hue, 0.72f, 0.96f);
+            setClientAccent(0xFF000000 | (rgb & 0x00FFFFFF));
+        } else {
+            setClientAccent(c.clientAccent);
+        }
+    }
+
+    public static int getDynamicColor(int baseColor, int offsetMs) {
+        ArtemConfig c = ArtemConfig.get();
+        if (!c.rgbMode) return baseColor;
+        float hue = (((System.currentTimeMillis() + offsetMs) % 4000L) / 4000f * c.rgbSpeed) % 1.0f;
+        int rgb = Color.HSBtoRGB(hue, 0.72f, 0.98f);
+        return 0xFF000000 | (rgb & 0x00FFFFFF);
     }
 
     public static void setClientAccent(int primary) {
@@ -141,11 +161,11 @@ public class NeonButton extends ClickableWidget {
         if (style == Style.SLIDER) {
             double val = sliderGet != null ? sliderGet.getAsDouble() : sliderMin;
             double ratio = (sliderMax > sliderMin) ? Math.max(0.0, Math.min(1.0, (val - sliderMin) / (sliderMax - sliderMin))) : 0.0;
-            String valStr = sliderInteger ? String.valueOf((int) Math.round(val)) : String.format("%.1f", val);
+            String valStr = sliderInteger ? String.valueOf((int) Math.round(val)) : String.format("%.2f", val);
 
-            drawSmallText(ctx, tr, rawText, x + 1, y + 1, hover || draggingSlider ? TEXT_ON : TEXT, 0.85f);
-            int vw = Math.round(tr.getWidth(valStr) * 0.85f);
-            drawSmallText(ctx, tr, valStr, x + w - vw - 2, y + 1, ACCENT_BRIGHT, 0.85f);
+            drawSmallText(ctx, tr, rawText, x + 1, y + 1, hover || draggingSlider ? TEXT_ON : TEXT, 0.82f);
+            int vw = Math.round(tr.getWidth(valStr) * 0.82f);
+            drawSmallText(ctx, tr, valStr, x + w - vw - 2, y + 1, ACCENT_BRIGHT, 0.82f);
 
             int barX = x + 2;
             int barY = y + h - 4;
@@ -166,11 +186,11 @@ public class NeonButton extends ClickableWidget {
         }
 
         if (style == Style.COLOR_SWATCHES && swatchPalette != null) {
-            drawSmallText(ctx, tr, rawText, x + 1, y + 3, TEXT, 0.85f);
+            drawSmallText(ctx, tr, rawText, x + 1, y + 3, TEXT, 0.82f);
             int current = swatchGet != null ? swatchGet.getAsInt() : swatchPalette[0];
             int count = swatchPalette.length;
             int r = 4;
-            int spacing = 13;
+            int spacing = 12;
             int startX = x + w - (count - 1) * spacing - r - 2;
             int cy = y + 6;
             for (int col : swatchPalette) {
@@ -201,12 +221,11 @@ public class NeonButton extends ClickableWidget {
 
             String cleanName = rawText.replace(": ВКЛ", "").replace(": ВЫКЛ", "");
             int labelCol = on ? TEXT_ON : (hover ? 0xFF8C8CA4 : TEXT_DIM);
-            drawSmallText(ctx, tr, cleanName, x + 8, y + (h - 7) / 2f, labelCol, 0.88f);
+            drawSmallText(ctx, tr, cleanName, x + 7, y + (h - 7) / 2f, labelCol, 0.85f);
 
-            // Тумблер-пилюля справа как на 2-м скриншоте PulseVisuals
-            int tw = 22;
-            int th = 11;
-            int tx = x + w - tw - 6;
+            int tw = 20;
+            int th = 10;
+            int tx = x + w - tw - 5;
             int ty = y + (h - th) / 2;
 
             if (on) {
@@ -217,7 +236,7 @@ public class NeonButton extends ClickableWidget {
                 drawSmoothRoundedOutline(ctx, tx, ty, tw, th, 5, 0x18FFFFFF);
             }
 
-            int travel = tw - 11;
+            int travel = tw - 10;
             int kcx = tx + 5 + Math.round(travel * toggleAnim);
             int kcy = ty + th / 2;
             drawCircle(ctx, kcx, kcy, 3, on ? 0xFFFFFFFF : 0xFF686880);
@@ -229,42 +248,42 @@ public class NeonButton extends ClickableWidget {
             if (colonIdx > 0 && colonIdx < rawText.length() - 1) {
                 String k = rawText.substring(0, colonIdx + 1);
                 String v = rawText.substring(colonIdx + 1).trim();
-                drawSmallText(ctx, tr, k, x + 8, y + (h - 7) / 2f, 0xFF9A9AB2, 0.88f);
-                int vw = Math.round(tr.getWidth(v) * 0.88f);
-                drawSmallText(ctx, tr, v, x + w - vw - 8, y + (h - 7) / 2f, ACCENT_BRIGHT, 0.88f);
+                drawSmallText(ctx, tr, k, x + 7, y + (h - 7) / 2f, 0xFF9A9AB2, 0.84f);
+                int vw = Math.round(tr.getWidth(v) * 0.84f);
+                drawSmallText(ctx, tr, v, x + w - vw - 7, y + (h - 7) / 2f, ACCENT_BRIGHT, 0.84f);
             } else {
-                float tw = tr.getWidth(rawText) * 0.88f;
-                drawSmallText(ctx, tr, rawText, x + (w - tw) / 2f, y + (h - 7) / 2f, hover ? TEXT_ON : TEXT, 0.88f);
+                float tw = tr.getWidth(rawText) * 0.84f;
+                drawSmallText(ctx, tr, rawText, x + (w - tw) / 2f, y + (h - 7) / 2f, hover ? TEXT_ON : TEXT, 0.84f);
             }
         }
     }
 
     private void drawDockGlyph(DrawContext ctx, int cx, int cy, int idx, int col) {
         switch (idx) {
-            case 0 -> { // Visuals (круг с точкой в центре как на скриншоте)
+            case 0 -> { // Visual
                 drawCircle(ctx, cx, cy, 4, col);
                 drawCircle(ctx, cx, cy, 2, 0xFF141422);
                 ctx.fill(cx, cy, cx + 1, cy + 1, col);
             }
-            case 1 -> { // HUD (сетка виджетов)
+            case 1 -> { // HUD
                 fillSmoothRounded(ctx, cx - 4, cy - 4, 3, 3, 1, col);
                 fillSmoothRounded(ctx, cx + 1, cy - 4, 3, 3, 1, col);
                 fillSmoothRounded(ctx, cx - 4, cy + 1, 3, 3, 1, col);
                 fillSmoothRounded(ctx, cx + 1, cy + 1, 3, 3, 1, col);
             }
-            case 2 -> { // Прицел
+            case 2 -> { // Crosshair
                 ctx.fill(cx, cy - 4, cx + 1, cy - 1, col);
                 ctx.fill(cx, cy + 2, cx + 1, cy + 5, col);
                 ctx.fill(cx - 4, cy, cx - 1, cy + 1, col);
                 ctx.fill(cx + 2, cy, cx + 5, cy + 1, col);
                 ctx.fill(cx, cy, cx + 1, cy + 1, col);
             }
-            case 3 -> { // Utilities / FunTime
+            case 3 -> { // FunTime / Perf
                 ctx.fill(cx, cy - 4, cx + 2, cy, col);
                 ctx.fill(cx - 3, cy - 1, cx + 4, cy + 1, col);
                 ctx.fill(cx - 1, cy, cx + 1, cy + 4, col);
             }
-            default -> { // Профили
+            default -> { // Settings & Configs
                 fillSmoothRounded(ctx, cx - 4, cy - 3, 4, 2, 1, col);
                 fillSmoothRounded(ctx, cx - 4, cy - 2, 8, 6, 1, col);
             }
@@ -280,7 +299,7 @@ public class NeonButton extends ClickableWidget {
         if (sliderInteger) {
             raw = Math.round(raw);
         } else {
-            raw = Math.round(raw * 10.0) / 10.0;
+            raw = Math.round(raw * 100.0) / 100.0;
         }
         sliderSet.accept(raw);
     }
@@ -297,7 +316,7 @@ public class NeonButton extends ClickableWidget {
         if (style == Style.COLOR_SWATCHES && button == 0 && swatchPalette != null && swatchSet != null) {
             int count = swatchPalette.length;
             int r = 4;
-            int spacing = 13;
+            int spacing = 12;
             int startX = getX() + width - (count - 1) * spacing - r - 2;
             for (int col : swatchPalette) {
                 if (Math.abs(mouseX - startX) <= 6) {
@@ -339,8 +358,6 @@ public class NeonButton extends ClickableWidget {
         }
         return super.mouseReleased(mouseX, mouseY, button);
     }
-
-    // ——— Вспомогательные методы отрисовки ———
 
     public static void drawSmallText(DrawContext ctx, TextRenderer tr, String text, float x, float y, int color, float scale) {
         ctx.getMatrices().push();
