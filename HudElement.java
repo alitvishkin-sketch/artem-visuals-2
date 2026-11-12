@@ -8,7 +8,7 @@ import net.minecraft.client.gui.DrawContext;
 public abstract class HudElement {
     public final String id;
     protected int width = 46;
-    protected int height = 13;
+    protected int height = 14;
     private boolean dragging;
     private int dragOffsetX, dragOffsetY;
 
@@ -23,12 +23,16 @@ public abstract class HudElement {
     protected void measure(MinecraftClient mc) {
         String text = getText(mc);
         int textW = mc.textRenderer.getWidth(text);
-        width = Math.max(36, textW + 10);
-        height = 13;
+        width = Math.max(38, textW + 10);
+        height = 14;
     }
 
     protected float effectiveScale(ArtemConfig c, ArtemConfig.HudPos pos) {
         return Math.max(0.45f, Math.min(1.50f, pos.scale * c.hudScale));
+    }
+
+    protected int glassBorder() {
+        return 0x22FFFFFF;
     }
 
     public void render(DrawContext ctx, MinecraftClient mc, ArtemConfig c) {
@@ -66,7 +70,7 @@ public abstract class HudElement {
         int accentColor = NeonButton.getHudAccentBright(id.hashCode() * 110);
 
         NeonButton.fillGradientRounded(ctx, x, y, width, height, 4, NeonButton.HUD_BG_TOP, NeonButton.HUD_BG_BOTTOM);
-        NeonButton.drawSmoothRoundedOutline(ctx, x, y, width, height, 4, (NeonButton.HUD_ACCENT & 0x00FFFFFF) | 0x38000000);
+        NeonButton.drawSmoothRoundedOutline(ctx, x, y, width, height, 4, glassBorder());
 
         int spaceIdx = text.indexOf(' ');
         if (spaceIdx > 0 && spaceIdx < text.length() - 1) {
