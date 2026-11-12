@@ -20,11 +20,14 @@ import net.minecraft.client.util.math.MatrixStack;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.ItemEntity;
 import net.minecraft.entity.LivingEntity;
+import net.minecraft.entity.effect.StatusEffectInstance;
 import net.minecraft.entity.mob.MobEntity;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.entity.projectile.ProjectileEntity;
+import net.minecraft.item.ItemStack;
 import net.minecraft.particle.ParticleTypes;
 import net.minecraft.registry.tag.FluidTags;
+import net.minecraft.text.Text;
 import net.minecraft.util.ActionResult;
 import net.minecraft.util.hit.BlockHitResult;
 import net.minecraft.util.hit.HitResult;
@@ -32,6 +35,7 @@ import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Box;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.util.shape.VoxelShape;
+import org.lwjgl.glfw.GLFW;
 
 import java.util.*;
 
@@ -43,6 +47,11 @@ public final class EffectManager {
     private static final List<DamagePopup> DAMAGE_POPUPS = new ArrayList<>();
     private static final Map<Integer, Float> LAST_HEALTH_MAP = new HashMap<>();
     private static boolean wasOnGround = true;
+    private static boolean wasDead = false;
+    private static boolean wasAhKeyDown = false;
+    private static long lastRelistReminderMs = 0L;
+    private static String helperAlertText = null;
+    private static int helperAlertColor = 0xFFFFB703;
 
     private record JumpRing(double x, double y, double z, long createdMs, float maxRadius, int color) {}
     private record DamagePopup(double x, double y, double z, float amount, long createdMs) {}
@@ -96,6 +105,19 @@ public final class EffectManager {
         });
     }
 
+    public static void triggerAhSearchForHand(MinecraftClient client) {
+        if (client == null || client.player == null || client.getNetworkHandler() == null) return;
+        ItemStack held = client.player.getMainHandStack();
+        if (held.isEmpty()) {
+            client.player.sendMessage(Text.literal("§d[Artem] §7Возьмите предмет в руку для поиска на аукционе."), false);
+            return;
+        }
+        String cleanName = held.getName().getString().trim();
+        if (!cleanName.isEmpty()) {
+            client.getNetworkHandler().sendChatCommand("ah search " + cleanName);
+        }
+    }
+
     public static void tick(MinecraftClient client) {
         HudManager.tick(client);
 
@@ -105,12 +127,88 @@ public final class EffectManager {
             PROJECTILE_TRAILS.clear();
             DAMAGE_POPUPS.clear();
             LAST_HEALTH_MAP.clear();
+            helperAlertText = null;
             return;
         }
 
         ArtemConfig c = ArtemConfig.get();
         long now = System.currentTimeMillis();
 
+        // --- ХЕЛПЕРЫ ---
+        // 1. Авто-спринт
+        if (c.autoSprint && client.options != null && client.options.forwardKey.isPressed()
+                && !client.player.isSneaking() && !client.player.horizontalCollision
+                && client.player.getHungerManager().getFoodLevel() > 6) {
+            client.player.setSprinting(true);
+        }
+
+        // 2. Координаты смерти и авто-точка смерти
+        boolean dead = client.player.isDead() || client.player.getHealth() <= 0.0f;
+        if (dead && !wasDead) {
+            BlockPos dp = client.player.getBlockPos();
+            if (c.deathCoords) {
+                client.player.sendMessage(Text.literal(
+                        String.format("§d[Artem] §fКоординаты смерти: §b%d %d %d", dp.getX(), dp.getY(), dp.getZ())), false);
+            }
+            if (c.autoDeathWaypoint) {
+                c.waypoints.removeIf(w -> "Смерть".equalsIgnoreCase(w.name));
+                c.waypoints.add(new ArtemConfig.Waypoint("Смерть", dp.getX(), dp.getY(), dp.getZ(), 0xFFFF595E));
+                c.save();
+            }
+        }
+        wasDead = dead;
+
+        // 3. Поиск на /ah по предмету в руке (клавиша H)
+        if (c.ahSearchHandItem && client.currentScreen == null && client.getWindow() != null && c.ahSearchKeyCode > 0) {
+            boolean ahDown = GLFW.glfwGetKey(client.getWindow().getHandle(), c.ahSearchKeyCode) == GLFW.GLFW_PRESS;
+            if (ahDown && !wasAhKeyDown) {
+                triggerAhSearchForHand(client);
+            }
+            wasAhKeyDown = ahDown;
+        } else {
+            wasAhKeyDown = false;
+        }
+
+        // 4. Напоминание о перевыставлении лотов на аукционе
+        if (c.ahAutoRelist && c.ahRelistInterval >= 10) {
+            long intervalMs = c.ahRelistInterval * 1000L;
+            if (lastRelistReminderMs == 0L) {
+                lastRelistReminderMs = now;
+            } else if (now - lastRelistReminderMs >= intervalMs) {
+                lastRelistReminderMs = now;
+                client.player.sendMessage(Text.literal("§d[Аукцион] §fПора обновить лоты на аукционе (§e/ah§f)"), false);
+            }
+        } else {
+            lastRelistReminderMs = 0L;
+        }
+
+        // 5. Проверка низкой прочности брони и окончания зелий
+        helperAlertText = null;
+        if (c.lowArmorAlert) {
+            for (int s = 3; s >= 0; s--) {
+                ItemStack armor = client.player.getInventory().getArmorStack(s);
+                if (!armor.isEmpty() && armor.isDamageable() && armor.getMaxDamage() > 0) {
+                    int pct = Math.round(((armor.getMaxDamage() - armor.getDamage()) / (float) armor.getMaxDamage()) * 100f);
+                    if (pct <= c.lowArmorThreshold) {
+                        helperAlertText = "⚠ Низкая прочность: " + armor.getName().getString() + " (" + pct + "%)";
+                        helperAlertColor = 0xFFFF595E;
+                        break;
+                    }
+                }
+            }
+        }
+        if (helperAlertText == null && c.potionExpiryAlert) {
+            for (StatusEffectInstance inst : client.player.getStatusEffects()) {
+                if (!inst.isInfinite() && inst.getDuration() > 0 && inst.getDuration() <= 100 && inst.getEffectType().value().isBeneficial()) {
+                    int sec = Math.max(1, (inst.getDuration() + 19) / 20);
+                    helperAlertText = "⏱ Эффект заканчивается: " + inst.getEffectType().value().getName().getString() + " (" + sec + "с)";
+                    helperAlertColor = 0xFFFFB703;
+                    break;
+                }
+            }
+        }
+
+        // --- ВИЗУАЛЫ ---
         if (c.renderTweaks && client.options != null) {
             client.options.getBobView().setValue(false);
         }
@@ -229,7 +327,6 @@ public final class EffectManager {
         int sw = mc.getWindow().getScaledWidth();
         int sh = mc.getWindow().getScaledHeight();
 
-        // Мягкое неоновое свечение за предметами в руках (стиль Andromeda Visuals)
         if (c.handGlow && mc.options.getPerspective().isFirstPerson()) {
             int rgb = NeonButton.getHudAccent(0) & 0x00FFFFFF;
             if (!mc.player.getOffHandStack().isEmpty()) {
@@ -250,13 +347,43 @@ public final class EffectManager {
             ctx.fill(0, 0, sw, sh, (NeonButton.ACCENT & 0x00FFFFFF) | 0x16000000);
         }
 
-        if (!c.nameTags && !c.damageIndicator && !(c.itemEsp && c.itemEspLabels)) return;
+        // Баннер предупреждения хелпера (броня / зелья)
+        if (helperAlertText != null) {
+            int aw = Math.round(mc.textRenderer.getWidth(helperAlertText) * 0.85f) + 12;
+            int ax = (sw - aw) / 2;
+            int ay = sh - 54;
+            NeonButton.fillSmoothRounded(ctx, ax, ay, aw, 13, 4, NeonButton.HUD_BG_TOP);
+            NeonButton.drawSmoothRoundedOutline(ctx, ax, ay, aw, 13, 4, (helperAlertColor & 0x00FFFFFF) | 0x88000000);
+            NeonButton.drawSmallText(ctx, mc.textRenderer, helperAlertText, ax + 6, ay + 3, helperAlertColor, 0.85f);
+        }
 
         Camera cam = mc.gameRenderer.getCamera();
         Vec3d camPos = cam.getPos();
         float yaw = cam.getYaw();
         float pitch = cam.getPitch();
         double fov = mc.options.getFov().getValue();
+
+        // Отображение Точек (Waypoints) на экране
+        if (c.showWaypoints && !c.waypoints.isEmpty()) {
+            for (ArtemConfig.Waypoint wp : c.waypoints) {
+                if (wp == null || !wp.enabled) continue;
+                double[] scr = projectToScreen(wp.x + 0.5, wp.y + 1.2, wp.z + 0.5, camPos, yaw, pitch, fov, sw, sh);
+                if (scr == null) continue;
+                double dist = Math.sqrt(mc.player.squaredDistanceTo(wp.x + 0.5, wp.y, wp.z + 0.5));
+                String label = wp.name + " [" + Math.round(dist) + "m]";
+                int tw = Math.round(mc.textRenderer.getWidth(label) * 0.80f) + 14;
+                int px = (int) Math.round(scr[0] - tw / 2.0);
+                int py = (int) Math.round(scr[1] - 12);
+                int col = 0xFF000000 | (wp.color & 0x00FFFFFF);
+
+                NeonButton.fillSmoothRounded(ctx, px, py, tw, 12, 3, NeonButton.HUD_BG_TOP);
+                NeonButton.drawSmoothRoundedOutline(ctx, px, py, tw, 12, 3, (col & 0x00FFFFFF) | 0x77000000);
+                NeonButton.drawCircle(ctx, px + 6, py + 6, 2, col);
+                NeonButton.drawSmallText(ctx, mc.textRenderer, label, px + 11, py + 3, 0xFFF2F2FA, 0.80f);
+            }
+        }
+
+        if (!c.nameTags && !c.damageIndicator && !(c.itemEsp && c.itemEspLabels)) return;
 
         if (c.nameTags || (c.itemEsp && c.itemEspLabels)) {
             for (Entity e : mc.world.getEntities()) {
@@ -269,7 +396,9 @@ public final class EffectManager {
                             camPos, yaw, pitch, fov, sw, sh);
                     if (screen == null) continue;
 
-                    String name = target.getName().getString();
+                    String rawName = target.getName().getString();
+                    boolean friend = c.highlightFriends && c.isFriend(rawName);
+                    String name = (friend ? "★ " : "") + rawName;
                     String hpTxt = c.nameTagsHealth ? String.format(" %.1f❤", target.getHealth()) : "";
                     String distTxt = c.nameTagsDistance ? String.format(" [%dm]", Math.round(Math.sqrt(distSq))) : "";
                     String full = name + hpTxt + distTxt;
@@ -280,10 +409,11 @@ public final class EffectManager {
                     int py = (int) Math.round(screen[1] - th);
 
                     NeonButton.fillSmoothRounded(ctx, px, py, tw, th, 3, NeonButton.HUD_BG_TOP);
-                    NeonButton.drawSmoothRoundedOutline(ctx, px, py, tw, th, 3, 0x26FFFFFF);
+                    NeonButton.drawSmoothRoundedOutline(ctx, px, py, tw, th, 3,
+                            friend ? ((c.friendColor & 0x00FFFFFF) | 0x88000000) : 0x26FFFFFF);
 
                     int tx = px + 4, ty = py + 2;
-                    ctx.drawText(mc.textRenderer, name, tx, ty, 0xFFF4F4FC, false);
+                    ctx.drawText(mc.textRenderer, name, tx, ty, friend ? c.friendColor : 0xFFF4F4FC, false);
                     tx += mc.textRenderer.getWidth(name);
                     if (!hpTxt.isEmpty()) {
                         ctx.drawText(mc.textRenderer, hpTxt, tx, ty, 0xFFFF5E7E, false);
@@ -370,14 +500,16 @@ public final class EffectManager {
             for (Entity e : mc.world.getEntities()) {
                 if (e == mc.player || e.squaredDistanceTo(mc.player) > 72 * 72) continue;
                 Box box = e.getBoundingBox().offset(-cam.x, -cam.y, -cam.z);
-                if (e instanceof PlayerEntity) {
-                    if (c.esp) drawStyledEsp(matrices, lines, box, NeonButton.getDynamicColor(c.espColor, e.getId() * 150), c.espAlpha * pulse, c.espStyle);
-                    if (c.playerHighlight) drawBoxColor(matrices, lines, box.expand(0.04), NeonButton.getDynamicColor(c.playerHighlightColor, 0), c.playerHighlightAlpha * pulse);
+                if (e instanceof PlayerEntity pe) {
+                    boolean isFr = c.highlightFriends && c.isFriend(pe.getName().getString());
+                    int pCol = isFr ? c.friendColor : NeonButton.getDynamicColor(c.espColor, e.getId() * 150);
+                    if (c.esp) drawStyledEsp(matrices, lines, box, pCol, c.espAlpha * pulse, c.espStyle);
+                    if (c.playerHighlight) drawBoxColor(matrices, lines, box.expand(0.04), isFr ? c.friendColor : NeonButton.getDynamicColor(c.playerHighlightColor, 0), c.playerHighlightAlpha * pulse);
                     if (c.chams) {
-                        int col = NeonButton.getDynamicColor(c.chamsColor, 200);
+                        int col = isFr ? c.friendColor : NeonButton.getDynamicColor(c.chamsColor, 200);
                         for (int l = 1; l <= 3; l++) drawBoxColor(matrices, lines, box.expand(-0.04 * l), col, c.chamsAlpha);
                     }
-                    if (c.tracers) draw3DLine(matrices, lines, lookX, lookY, lookZ, e.getX() - cam.x, e.getY() + e.getHeight() * 0.5 - cam.y, e.getZ() - cam.z, NeonButton.getDynamicColor(c.tracersColor, 0), c.tracersAlpha);
+                    if (c.tracers) draw3DLine(matrices, lines, lookX, lookY, lookZ, e.getX() - cam.x, e.getY() + e.getHeight() * 0.5 - cam.y, e.getZ() - cam.z, isFr ? c.friendColor : NeonButton.getDynamicColor(c.tracersColor, 0), c.tracersAlpha);
                 } else if (e instanceof ItemEntity && c.itemEsp) {
                     drawBoxColor(matrices, lines, box.expand(0.05), NeonButton.getDynamicColor(c.itemEspColor, 0), 0.90f);
                 } else if (e instanceof MobEntity && c.mobEsp) {
@@ -518,3 +650,4 @@ public final class EffectManager {
         WorldRenderer.drawBox(matrices, lines, new Box(sx - 0.005, sy - 0.005, sz - size, sx + 0.005, sy + 0.005, sz + size), r, g, b, alpha * 0.9f);
     }
 }
+// === КОНЕЦ ФАЙЛА ===
