@@ -828,4 +828,46 @@ public final class HudManager {
             NeonButton.drawSmoothRoundedOutline(ctx, x, y, width, height, 5, glassBorder());
             int cx = x + width / 2, cy = y + height / 2;
             ctx.fill(cx, y + 3, cx + 1, y + height - 3, 0x18FFFFFF);
-            ctx.fill(x
+            ctx.fill(x + 3, cy, x + width - 3, cy + 1, 0x18FFFFFF);
+            NeonButton.drawCircle(ctx, cx, cy, 1, 0xFFFFFFFF);
+            if (mc.world == null || mc.player == null) return;
+            double rad = Math.toRadians(mc.player.getYaw() + 180.0), cos = Math.cos(rad), sin = Math.sin(rad);
+            for (Entity e : mc.world.getEntities()) {
+                if (e == mc.player) continue;
+                double dx = e.getX() - mc.player.getX(), dz = e.getZ() - mc.player.getZ();
+                if (dx * dx + dz * dz > 48 * 48) continue;
+                int px = MathHelper.clamp((int) Math.round(cx + (dx * cos - dz * sin) * 0.40), x + 3, x + width - 4);
+                int py = MathHelper.clamp((int) Math.round(cy + (dx * sin + dz * cos) * 0.40), y + 3, y + height - 4);
+                int col = (e instanceof PlayerEntity) ? accB : (e instanceof MobEntity) ? 0xFFFFB703 : (e instanceof ItemEntity) ? 0xFF00F5FF : 0;
+                if (col != 0) NeonButton.drawCircle(ctx, px, py, 1, col);
+            }
+        }
+        @Override protected int defaultX() { return screenW() - 46; } @Override protected int defaultY() { return screenH() - 68; }
+    }
+
+    static class MinimapElement extends HudElement {
+        MinimapElement() { super("minimap"); }
+        @Override public boolean isEnabled(ArtemConfig c) { return c.showMinimap; }
+        @Override public String getText(MinecraftClient mc) { return "MiniMap"; }
+        @Override public int getColor(MinecraftClient mc) { return NeonButton.getHudAccent(0); }
+        @Override protected void measure(MinecraftClient mc) { width = 52; height = 52; }
+
+        @Override protected void renderBody(DrawContext ctx, MinecraftClient mc, ArtemConfig c, int x, int y) {
+            int accB = NeonButton.getHudAccentBright(0);
+            NeonButton.fillGradientRounded(ctx, x, y, width, height, 5, NeonButton.HUD_BG_TOP, NeonButton.HUD_BG_BOTTOM);
+            NeonButton.drawSmoothRoundedOutline(ctx, x, y, width, height, 5, glassBorder());
+            int ox = x + 2, oy = y + 2;
+            for (int rz = 0; rz < MAP_SIZE; rz++) {
+                for (int rx = 0; rx < MAP_SIZE; rx++) {
+                    int col = MINIMAP_COLORS[rz][rx];
+                    if (col != 0) ctx.fill(ox + rx * 2, oy + rz * 2, ox + (rx + 1) * 2, oy + (rz + 1) * 2, col);
+                }
+            }
+            int cx = x + width / 2, cy = y + height / 2;
+            NeonButton.drawCircle(ctx, cx, cy, 2, accB);
+            NeonButton.drawCircle(ctx, cx, cy, 1, 0xFFFFFFFF);
+            ctx.drawText(mc.textRenderer, "N", cx - 2, y + 3, accB, false);
+        }
+        @Override protected int defaultX() { return screenW() - 96; } @Override protected int defaultY() { return screenH() - 70; }
+    }
+}
