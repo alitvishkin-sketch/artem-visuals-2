@@ -27,8 +27,8 @@ import java.util.function.Supplier;
 
 public class ArtemScreen extends Screen {
     private enum Category {
-        MAIN("Основное", "Основные", null, "Меч, удар и прицел"),
-        HELPERS("Хелперы", "Основные", "New", "Помощник"),
+        MAIN("Основное", "Основные", null, "Меч и прицел"),
+        HELPERS("Хелперы", "Основные", "Updated", "Помощник"),
         AUCTION("Аукцион", "Основные", "Updated", "Фантайм"),
         OPTIMIZE("Оптимизация", "Основные", null, "Производительность"),
         VISUALS("Визуалы", "Основные", null, "Эффекты"),
@@ -52,7 +52,7 @@ public class ArtemScreen extends Screen {
         }
     }
 
-    private sealed interface RowItem permits ToggleRow, SliderRow, SwatchRow, ActionRow, HeaderLabelRow, KeybindRow {}
+    private sealed interface RowItem permits ToggleRow, SliderRow, SwatchRow, ActionRow, HeaderLabelRow, KeybindRow, CrosshairStyleRow {}
 
     private record HeaderLabelRow(String title, Category category) implements RowItem {}
     private record ToggleRow(String label, Category category, BooleanSupplier getter, Runnable toggler, Runnable onSettings) implements RowItem {}
@@ -60,6 +60,7 @@ public class ArtemScreen extends Screen {
     private record SwatchRow(String label, Category category, int[] palette, IntSupplier getter, IntConsumer setter) implements RowItem {}
     private record ActionRow(String label, Category category, Supplier<String> badgeText, Runnable action) implements RowItem {}
     private record KeybindRow(String label, Category category, IntSupplier getter, IntConsumer setter) implements RowItem {}
+    private record CrosshairStyleRow(String label, Category category) implements RowItem {}
 
     private static final int[] ACCENT_PALETTE = {
             0xFFA594F9, 0xFF8A7CFF, 0xFF00F5FF, 0xFFFF6B9D,
@@ -134,80 +135,47 @@ public class ArtemScreen extends Screen {
         return InputUtil.Type.KEYSYM.createFromCode(keyCode).getLocalizedText().getString().toUpperCase(Locale.ROOT);
     }
 
-    private String swingStyleName(int style) {
-        return switch (style) {
-            case 1 -> "Плавный (Smooth)";
-            case 2 -> "Снизу вверх (Bonk)";
-            case 3 -> "Веер / Вбок";
-            case 4 -> "Укол (Stab)";
-            case 5 -> "Круговой 360°";
-            default -> "Обычный (Vanilla)";
-        };
-    }
-
-    private String crosshairStyleName(int style) {
-        return switch (style) {
-            case 1 -> "Неоновое кольцо";
-            case 2 -> "Круг перезарядки";
-            case 3 -> "Шеврон (V-прицел)";
-            case 4 -> "X-Крест (45°)";
-            case 5 -> "Треугольник (Delta)";
-            case 6 -> "Двойная дуга";
-            case 7 -> "Точка с ореолом";
-            default -> "Гладкий крест";
-        };
-    }
-
     private List<RowItem> buildAllRows(ArtemConfig c) {
         List<RowItem> all = new ArrayList<>();
         MinecraftClient mc = MinecraftClient.getInstance();
 
-        // === ОСНОВНОЕ (МЕЧ, РАКУРС, УДАР И ПРИЦЕЛ) ===
-        all.add(new HeaderLabelRow("Расположение меча и ракурс", Category.MAIN));
-        all.add(new ToggleRow("Изменять размер и ракурс меча", Category.MAIN, () -> c.smallSword, () -> { c.smallSword = !c.smallSword; c.save(); }, null));
-        all.add(new ToggleRow("Применять только к оружию", Category.MAIN, () -> c.onlyWeapons, () -> { c.onlyWeapons = !c.onlyWeapons; c.save(); }, null));
-        all.add(new SliderRow("Размер меча (Scale)", Category.MAIN, 0.25, 1.30, false, () -> c.swordScale, v -> { c.swordScale = (float) v; c.save(); }));
-        all.add(new SliderRow("Позиция X (влево / вправо)", Category.MAIN, -0.50, 0.50, false, () -> c.swordOffsetX, v -> { c.swordOffsetX = (float) v; c.save(); }));
-        all.add(new SliderRow("Позиция Y (вниз / вверх)", Category.MAIN, -0.50, 0.50, false, () -> c.swordOffsetY, v -> { c.swordOffsetY = (float) v; c.save(); }));
-        all.add(new SliderRow("Позиция Z (дальше / ближе)", Category.MAIN, -0.50, 0.50, false, () -> c.swordOffsetZ, v -> { c.swordOffsetZ = (float) v; c.save(); }));
-        all.add(new SliderRow("Ракурс: наклон Pitch (X°)", Category.MAIN, -180, 180, true, () -> c.swordRotX, v -> { c.swordRotX = (float) v; c.save(); }));
-        all.add(new SliderRow("Ракурс: поворот Yaw (Y°)", Category.MAIN, -180, 180, true, () -> c.swordRotY, v -> { c.swordRotY = (float) v; c.save(); }));
-        all.add(new SliderRow("Ракурс: крен Roll (Z°)", Category.MAIN, -180, 180, true, () -> c.swordRotZ, v -> { c.swordRotZ = (float) v; c.save(); }));
-        all.add(new ActionRow("Анимация удара (стиль взмаха)", Category.MAIN, () -> swingStyleName(c.swingStyle), () -> {
-            c.swingStyle = (c.swingStyle + 1) % 6;
-            c.save();
-        }));
-        all.add(new SliderRow("Скорость анимации удара", Category.MAIN, 0.30, 2.50, false, () -> c.swingSpeed, v -> { c.swingSpeed = (float) v; c.save(); }));
-        all.add(new ActionRow("Сбросить ракурс и позицию меча", Category.MAIN, () -> "Сброс", () -> {
-            c.swordScale = 0.72f;
-            c.swordOffsetX = 0.04f;
-            c.swordOffsetY = -0.04f;
-            c.swordOffsetZ = -0.06f;
-            c.swordRotX = 0f;
-            c.swordRotY = 0f;
-            c.swordRotZ = 0f;
-            c.swingStyle = 1;
-            c.swingSpeed = 1.0f;
+        // === ОСНОВНОЕ (Меч, ракурс, стиль удара и гладкий прицел) ===
+        all.add(new HeaderLabelRow("Ракурс меча и анимация удара", Category.MAIN));
+        all.add(new ActionRow("Стиль удара (Swing)", Category.MAIN, () -> switch (c.swingStyle) {
+            case 1 -> "Плавный боковой";
+            case 2 -> "Блок-хит 1.7";
+            case 3 -> "Резкий выпад";
+            case 4 -> "Круговой 360°";
+            default -> "Обычный";
+        }, () -> { c.swingStyle = (c.swingStyle + 1) % 5; c.save(); }));
+        all.add(new ToggleRow("Маленький меч (SmallSword)", Category.MAIN, () -> c.smallSword, () -> { c.smallSword = !c.smallSword; c.save(); }, null));
+        all.add(new ToggleRow("Уменьшать только оружие", Category.MAIN, () -> c.onlyWeapons, () -> { c.onlyWeapons = !c.onlyWeapons; c.save(); }, null));
+        all.add(new SliderRow("Размер меча в руке", Category.MAIN, 0.25, 1.25, false, () -> c.swordScale, v -> { c.swordScale = (float) v; c.save(); }));
+        all.add(new SliderRow("Ракурс: наклон вперёд/назад (X°)", Category.MAIN, -90, 90, true, () -> c.swordRotX, v -> { c.swordRotX = (float) v; c.save(); }));
+        all.add(new SliderRow("Ракурс: поворот влево/вправо (Y°)", Category.MAIN, -90, 90, true, () -> c.swordRotY, v -> { c.swordRotY = (float) v; c.save(); }));
+        all.add(new SliderRow("Ракурс: наклон вбок (Z°)", Category.MAIN, -90, 90, true, () -> c.swordRotZ, v -> { c.swordRotZ = (float) v; c.save(); }));
+        all.add(new SliderRow("Позиция по X", Category.MAIN, -0.45, 0.45, false, () -> c.swordOffsetX, v -> { c.swordOffsetX = (float) v; c.save(); }));
+        all.add(new SliderRow("Позиция по Y", Category.MAIN, -0.45, 0.45, false, () -> c.swordOffsetY, v -> { c.swordOffsetY = (float) v; c.save(); }));
+        all.add(new SliderRow("Позиция по Z", Category.MAIN, -0.45, 0.45, false, () -> c.swordOffsetZ, v -> { c.swordOffsetZ = (float) v; c.save(); }));
+        all.add(new ActionRow("Сбросить ракурс меча", Category.MAIN, () -> "Сброс", () -> {
+            c.swordRotX = 0f; c.swordRotY = 0f; c.swordRotZ = 0f;
+            c.swordOffsetX = 0.03f; c.swordOffsetY = -0.04f; c.swordOffsetZ = -0.05f;
             c.save();
             toast("Ракурс меча сброшен");
         }));
 
-        all.add(new HeaderLabelRow("Кастомизация прицела (гладкий дизайн)", Category.MAIN));
-        all.add(new ToggleRow("Кастомный прицел (откл. стандартный)", Category.MAIN, () -> c.customCrosshair, () -> { c.customCrosshair = !c.customCrosshair; c.save(); }, null));
-        all.add(new ActionRow("Дизайн прицела (8 стилей)", Category.MAIN, () -> crosshairStyleName(c.crosshairStyle), () -> {
-            c.crosshairStyle = (c.crosshairStyle + 1) % 8;
-            c.save();
-        }));
-        all.add(new SliderRow("Размер прицела", Category.MAIN, 2, 16, true, () -> c.crosshairSize, v -> { c.crosshairSize = (int) v; c.save(); }));
-        all.add(new SliderRow("Зазор прицела (Gap)", Category.MAIN, 0, 12, true, () -> c.crosshairGap, v -> { c.crosshairGap = (int) v; c.save(); }));
-        all.add(new SliderRow("Толщина линий", Category.MAIN, 0.8, 3.5, false, () -> c.crosshairThickness, v -> { c.crosshairThickness = (float) v; c.save(); }));
-        all.add(new ToggleRow("Точка в центре прицела", Category.MAIN, () -> c.crosshairDot, () -> { c.crosshairDot = !c.crosshairDot; c.save(); }, null));
-        all.add(new ToggleRow("Тёмная обводка для чёткости", Category.MAIN, () -> c.crosshairOutline, () -> { c.crosshairOutline = !c.crosshairOutline; c.save(); }, null));
-        all.add(new ToggleRow("Динамика от движения и ударов", Category.MAIN, () -> c.crosshairDynamic, () -> { c.crosshairDynamic = !c.crosshairDynamic; c.save(); }, null));
-        all.add(new ToggleRow("Кольцо перезарядки удара", Category.MAIN, () -> c.crosshairCooldownRing, () -> { c.crosshairCooldownRing = !c.crosshairCooldownRing; c.save(); }, null));
+        all.add(new HeaderLabelRow("Кастомный гладкий прицел (отключает ванильный)", Category.MAIN));
+        all.add(new ToggleRow("Кастомный прицел (убрать обычный)", Category.MAIN, () -> c.customCrosshair, () -> { c.customCrosshair = !c.customCrosshair; c.save(); }, null));
+        all.add(new CrosshairStyleRow("Дизайн прицела (8 стилей)", Category.MAIN));
+        all.add(new SliderRow("Размер прицела", Category.MAIN, 2, 14, true, () -> c.crosshairSize, v -> { c.crosshairSize = (int) v; c.save(); }));
+        all.add(new SliderRow("Зазор от центра", Category.MAIN, 0, 12, true, () -> c.crosshairGap, v -> { c.crosshairGap = (int) v; c.save(); }));
+        all.add(new SliderRow("Толщина линий", Category.MAIN, 1, 4, true, () -> c.crosshairThickness, v -> { c.crosshairThickness = (int) v; c.save(); }));
+        all.add(new ToggleRow("Точка по центру прицела", Category.MAIN, () -> c.crosshairDot, () -> { c.crosshairDot = !c.crosshairDot; c.save(); }, null));
+        all.add(new ToggleRow("Мягкая тень / обводка прицела", Category.MAIN, () -> c.crosshairOutline, () -> { c.crosshairOutline = !c.crosshairOutline; c.save(); }, null));
+        all.add(new ToggleRow("Динамика прицела при ударе/ходьбе", Category.MAIN, () -> c.crosshairDynamic, () -> { c.crosshairDynamic = !c.crosshairDynamic; c.save(); }, null));
         all.add(new SwatchRow("Цвет прицела", Category.MAIN, ACCENT_PALETTE, () -> c.crosshairColor, v -> { c.crosshairColor = v; c.save(); }));
 
-        all.add(new HeaderLabelRow("Камера и руки", Category.MAIN));
+        all.add(new HeaderLabelRow("Камера и экран", Category.MAIN));
         all.add(new ToggleRow("Свечение предметов в руках", Category.MAIN, () -> c.handGlow, () -> { c.handGlow = !c.handGlow; c.save(); }, null));
         all.add(new ToggleRow("No HurtCam (Без тряски урона)", Category.MAIN, () -> c.noHurtCam, () -> { c.noHurtCam = !c.noHurtCam; c.save(); }, null));
         all.add(new ToggleRow("Low Fire (Низкий огонь)", Category.MAIN, () -> c.lowFire, () -> { c.lowFire = !c.lowFire; c.save(); }, null));
@@ -215,25 +183,17 @@ public class ArtemScreen extends Screen {
         all.add(new ToggleRow("Убрать покачивание камеры", Category.MAIN, () -> c.renderTweaks, () -> { c.renderTweaks = !c.renderTweaks; c.save(); }, null));
 
         // === ХЕЛПЕРЫ ===
-        all.add(new HeaderLabelRow("Таймеры и границы PvP", Category.HELPERS));
-        all.add(new ToggleRow("Таймер эндер-жемчуга (трекер полёта)", Category.HELPERS, () -> c.pearlTimer, () -> { c.pearlTimer = !c.pearlTimer; c.save(); },
+        all.add(new HeaderLabelRow("Таймер эндер-жемчуга и границы PvP", Category.HELPERS));
+        all.add(new ToggleRow("Окно секунд эндер-жемчуга слева", Category.HELPERS, () -> c.showPearlHud, () -> { c.showPearlHud = !c.showPearlHud; c.save(); }, null));
+        all.add(new ToggleRow("Таймер и луч приземления жемчуга", Category.HELPERS, () -> c.pearlTimer, () -> { c.pearlTimer = !c.pearlTimer; c.save(); },
                 () -> openSubDetails("Таймер эндер-жемчуга", List.of(
-                        new ToggleRow("Окно секунд слева в HUD", Category.HELPERS, () -> c.showPearlHud, () -> { c.showPearlHud = !c.showPearlHud; c.save(); }, null),
-                        new ToggleRow("Линия траектории и луч падения", Category.HELPERS, () -> c.pearlTrajectory, () -> { c.pearlTrajectory = !c.pearlTrajectory; c.save(); }, null),
+                        new ToggleRow("Линия траектории полёта", Category.HELPERS, () -> c.pearlTrajectory, () -> { c.pearlTrajectory = !c.pearlTrajectory; c.save(); }, null),
                         new SwatchRow("Цвет индикатора", Category.HELPERS, ACCENT_PALETTE, () -> c.pearlColor, col -> { c.pearlColor = col; c.save(); })
                 ))));
-        all.add(new ToggleRow("Окно секунд перла слева в HUD", Category.HELPERS, () -> c.showPearlHud, () -> { c.showPearlHud = !c.showPearlHud; c.save(); }, null));
-        all.add(new ToggleRow("Границы Трапки / Пласта по блокам", Category.HELPERS, () -> c.trapPlastPreview, () -> { c.trapPlastPreview = !c.trapPlastPreview; c.save(); },
-                () -> openSubDetails("Границы Трапки / Пласта", List.of(
-                        new ActionRow("Режим отображения", Category.HELPERS, () -> switch (c.trapPlastMode) {
-                            case 1 -> "Трапка";
-                            case 2 -> "Пласт";
-                            default -> "Авто (предмет)";
-                        }, () -> { c.trapPlastMode = (c.trapPlastMode + 1) % 3; c.save(); }),
-                        new SliderRow("Ширина по блокам", Category.HELPERS, 3, 7, true, () -> c.trapPlastWidth, v -> { c.trapPlastWidth = (int) v; c.save(); }),
-                        new SliderRow("Высота трапки (блоков)", Category.HELPERS, 2, 6, true, () -> c.trapPlastHeight, v -> { c.trapPlastHeight = (int) v; c.save(); }),
-                        new SwatchRow("Цвет сетки блоков", Category.HELPERS, ACCENT_PALETTE, () -> c.trapPlastColor, col -> { c.trapPlastColor = col; c.save(); })
-                ))));
+        all.add(new ToggleRow("Линия траектории эндер-жемчуга", Category.HELPERS, () -> c.pearlTrajectory, () -> { c.pearlTrajectory = !c.pearlTrajectory; c.save(); }, null));
+        all.add(new SwatchRow("Цвет таймера жемчуга", Category.HELPERS, ACCENT_PALETTE, () -> c.pearlColor, col -> { c.pearlColor = col; c.save(); }));
+
+        all.add(new ToggleRow("Границы Трапки / Пласта по блокам", Category.HELPERS, () -> c.trapPlastPreview, () -> { c.trapPlastPreview = !c.trapPlastPreview; c.save(); }, null));
         all.add(new ActionRow("Режим границ (Трапка / Пласт)", Category.HELPERS, () -> switch (c.trapPlastMode) {
             case 1 -> "Трапка";
             case 2 -> "Пласт";
@@ -335,9 +295,9 @@ public class ArtemScreen extends Screen {
         all.add(new ToggleRow("Режим перемещения HUD", Category.HUD, () -> c.hudEditMode, () -> { c.hudEditMode = !c.hudEditMode; c.save(); }, null));
         all.add(new SliderRow("Масштаб элементов HUD", Category.HUD, 0.50, 1.20, false, () -> c.hudScale, v -> { c.hudScale = (float) v; c.save(); }));
         all.add(new ToggleRow("Верхняя панель (Ник/FPS/Время)", Category.HUD, () -> c.showServer, () -> { c.showServer = !c.showServer; c.save(); }, null));
-        all.add(new ToggleRow("Окно секунд перла слева", Category.HUD, () -> c.showPearlHud, () -> { c.showPearlHud = !c.showPearlHud; c.save(); }, null));
         all.add(new ToggleRow("Мини-инвентарь (Inventory)", Category.HUD, () -> c.showInventory, () -> { c.showInventory = !c.showInventory; c.save(); }, null));
         all.add(new ToggleRow("Эффекты зелий (Potions)", Category.HUD, () -> c.showPotions, () -> { c.showPotions = !c.showPotions; c.save(); }, null));
+        all.add(new ToggleRow("Окно таймера жемчуга (Pearl Timer)", Category.HUD, () -> c.showPearlHud, () -> { c.showPearlHud = !c.showPearlHud; c.save(); }, null));
         all.add(new ToggleRow("Кулдауны предметов (Cooldowns)", Category.HUD, () -> c.showCooldowns, () -> { c.showCooldowns = !c.showCooldowns; c.save(); }, null));
         all.add(new ToggleRow("Горячие клавиши (Keybinds)", Category.HUD, () -> c.showHotKeys, () -> { c.showHotKeys = !c.showHotKeys; c.save(); }, null));
         all.add(new ToggleRow("Моделька игрока (Paperdoll)", Category.HUD, () -> c.showPaperdoll, () -> { c.showPaperdoll = !c.showPaperdoll; c.save(); }, null));
@@ -529,6 +489,7 @@ public class ArtemScreen extends Screen {
         if (r instanceof SwatchRow w) return w.label();
         if (r instanceof ActionRow a) return a.label();
         if (r instanceof KeybindRow k) return k.label();
+        if (r instanceof CrosshairStyleRow cs) return cs.label();
         return "";
     }
 
@@ -539,11 +500,13 @@ public class ArtemScreen extends Screen {
         if (r instanceof SwatchRow w) return w.category();
         if (r instanceof ActionRow a) return a.category();
         if (r instanceof KeybindRow k) return k.category();
+        if (r instanceof CrosshairStyleRow cs) return cs.category();
         return Category.MAIN;
     }
 
     private int rowHeight(RowItem r) {
         if (r instanceof HeaderLabelRow) return 12;
+        if (r instanceof CrosshairStyleRow) return 22;
         return (r instanceof SliderRow) ? 24 : 18;
     }
 
@@ -719,7 +682,24 @@ public class ArtemScreen extends Screen {
         NeonButton.fillSmoothRounded(ctx, x, y, w, h, 4, hovered ? 0xFF22222C : 0xFF1C1C24);
         NeonButton.drawSmoothRoundedOutline(ctx, x, y, w, h, 4, hovered ? 0x20FFFFFF : 0x10FFFFFF);
 
-        if (item instanceof ToggleRow tr) {
+        if (item instanceof CrosshairStyleRow cs) {
+            ArtemConfig c = ArtemConfig.get();
+            int st = Math.floorMod(c.crosshairStyle, HudManager.CROSSHAIR_STYLE_NAMES.length);
+            String styleName = (st + 1) + "/8 • " + HudManager.CROSSHAIR_STYLE_NAMES[st];
+
+            drawRowBulletIcon(ctx, x + 6, y + 7, accB);
+            NeonButton.drawSmallText(ctx, textRenderer, cs.label(), x + 16, y + 8, 0xFFD8D8EA, 0.80f);
+
+            int bw = Math.round(textRenderer.getWidth(styleName) * 0.76f) + 10;
+            int bx = x + w - bw - 6;
+            NeonButton.fillSmoothRounded(ctx, bx, y + 5, bw, 12, 3, hovered ? acc : 0xFF262632);
+            NeonButton.drawSmallText(ctx, textRenderer, styleName, bx + 5, y + 8, hovered ? 0xFF121218 : accB, 0.76f);
+
+            int prevBoxX = bx - 22;
+            NeonButton.fillSmoothRounded(ctx, prevBoxX, y + 3, 16, 16, 3, 0xFF121218);
+            NeonButton.drawSmoothRoundedOutline(ctx, prevBoxX, y + 3, 16, 16, 3, 0x22FFFFFF);
+            HudManager.renderCrosshairPreview(ctx, prevBoxX + 8.0f, y + 11.0f, st, c.crosshairColor);
+        } else if (item instanceof ToggleRow tr) {
             boolean on = tr.getter().getAsBoolean();
             drawRowBulletIcon(ctx, x + 6, y + 5, on ? accB : 0xFF7D7D94);
             NeonButton.drawSmallText(ctx, textRenderer, tr.label(), x + 16, y + 6, on ? 0xFFF2F2FA : 0xFFB8B8CC, 0.82f);
@@ -739,53 +719,50 @@ public class ArtemScreen extends Screen {
                 ctx.fill(rightX + 7, cbY + 4, rightX + 8, cbY + 5, 0xFF121218);
             } else {
                 NeonButton.fillSmoothRounded(ctx, rightX, cbY, 10, 10, 2, 0xFF282834);
-                NeonButton.drawSmoothRoundedOutline(ctx, rightX, cbY, 10, 10, 2, 0x22FFFFFF);
+                NeonButton.drawSmoothRoundedOutline(ctx, rightX, cbY, 10, 10, 2, 0x24FFFFFF);
             }
-        } else if (item instanceof KeybindRow kb) {
-            boolean listening = (listeningKeybind == kb);
-            int keyCode = kb.getter().getAsInt();
-            drawRowBulletIcon(ctx, x + 6, y + 5, listening ? accB : (keyCode > 0 ? accB : 0xFF7D7D94));
-            NeonButton.drawSmallText(ctx, textRenderer, kb.label(), x + 16, y + 6, 0xFFD8D8EA, 0.80f);
-
-            String badge = listening ? "Нажмите клавишу..." : ("[ " + formatKeyName(keyCode) + " ]");
-            int bw = Math.round(textRenderer.getWidth(badge) * 0.76f) + 10;
-            int bx = x + w - bw - 6;
-            NeonButton.fillSmoothRounded(ctx, bx, y + 3, bw, 12, 3, listening ? acc : 0xFF262632);
-            NeonButton.drawSmallText(ctx, textRenderer, badge, bx + 5, y + 6, listening ? 0xFF121218 : accB, 0.76f);
         } else if (item instanceof SliderRow sr) {
             double val = sr.getter().getAsDouble();
             double norm = Math.max(0.0, Math.min(1.0, (val - sr.min()) / Math.max(0.0001, sr.max() - sr.min())));
-            String valStr = sr.integer() ? String.valueOf((int) Math.round(val)) : String.format(Locale.US, "%.2f", val);
+            String valStr = sr.integer() ? String.valueOf(Math.round(val)) : String.format(Locale.US, "%.2f", val);
 
-            drawRowBulletIcon(ctx, x + 6, y + 5, accB);
-            NeonButton.drawSmallText(ctx, textRenderer, sr.label(), x + 16, y + 5, 0xFFD8D8EA, 0.80f);
+            NeonButton.drawSmallText(ctx, textRenderer, sr.label(), x + 7, y + 4, 0xFFD4D4E6, 0.80f);
             int vw = Math.round(textRenderer.getWidth(valStr) * 0.80f);
-            NeonButton.drawSmallText(ctx, textRenderer, valStr, x + w - vw - 7, y + 5, 0xFFB8B8CE, 0.80f);
+            NeonButton.drawSmallText(ctx, textRenderer, valStr, x + w - vw - 7, y + 4, accB, 0.80f);
 
-            int trackX = x + 7;
-            int trackY = y + 17;
-            int trackW = w - 14;
-            NeonButton.fillSmoothRounded(ctx, trackX, trackY, trackW, 2, 1, 0xFF2B2B38);
-            int fillW = Math.max(2, (int) Math.round(trackW * norm));
-            NeonButton.fillSmoothRounded(ctx, trackX, trackY, fillW, 2, 1, accB);
-            NeonButton.drawCircle(ctx, trackX + fillW, trackY + 1, 2, 0xFFF4F4FC);
-        } else if (item instanceof SwatchRow sw) {
-            drawRowBulletIcon(ctx, x + 6, y + 5, accB);
-            NeonButton.drawSmallText(ctx, textRenderer, sw.label(), x + 16, y + 6, 0xFFD8D8EA, 0.80f);
-
-            int cur = sw.getter().getAsInt() & 0x00FFFFFF;
-            int sx = x + w - sw.palette().length * 11 - 5;
-            for (int col : sw.palette()) {
-                NeonButton.fillSmoothRounded(ctx, sx, y + 4, 9, 9, 2, 0xFF000000 | (col & 0x00FFFFFF));
-                if ((col & 0x00FFFFFF) == cur) {
-                    NeonButton.drawSmoothRoundedOutline(ctx, sx - 1, y + 3, 11, 11, 3, 0xFFFFFFFF);
+            int barX = x + 7;
+            int barY = y + 16;
+            int barW = w - 14;
+            NeonButton.fillSmoothRounded(ctx, barX, barY, barW, 3, 1, 0xFF2B2B38);
+            int fillW = Math.max(3, (int) Math.round(barW * norm));
+            NeonButton.fillGradientRounded(ctx, barX, barY, fillW, 3, 1, acc, accB);
+            NeonButton.drawCircle(ctx, barX + fillW, barY + 1, 3, 0xFFFFFFFF);
+        } else if (item instanceof SwatchRow swr) {
+            int cur = swr.getter().getAsInt() & 0x00FFFFFF;
+            NeonButton.drawSmallText(ctx, textRenderer, swr.label(), x + 7, y + 6, 0xFFD4D4E6, 0.80f);
+            int[] pal = swr.palette();
+            int startX = x + w - pal.length * 12 - 5;
+            for (int i = 0; i < pal.length; i++) {
+                int sx = startX + i * 12;
+                int sy = y + 4;
+                int col = 0xFF000000 | (pal[i] & 0x00FFFFFF);
+                NeonButton.fillSmoothRounded(ctx, sx, sy, 9, 9, 2, col);
+                if ((pal[i] & 0x00FFFFFF) == cur) {
+                    NeonButton.drawSmoothRoundedOutline(ctx, sx - 1, sy - 1, 11, 11, 3, 0xFFFFFFFF);
                 }
-                sx += 11;
             }
+        } else if (item instanceof KeybindRow kr) {
+            boolean isListening = (listeningKeybind == kr);
+            drawRowBulletIcon(ctx, x + 6, y + 5, isListening ? accB : 0xFF7D7D94);
+            NeonButton.drawSmallText(ctx, textRenderer, kr.label(), x + 16, y + 6, 0xFFD4D4E6, 0.80f);
+            String badge = isListening ? "Нажмите клавишу..." : formatKeyName(kr.getter().getAsInt());
+            int bw = Math.round(textRenderer.getWidth(badge) * 0.78f) + 10;
+            int bx = x + w - bw - 6;
+            NeonButton.fillSmoothRounded(ctx, bx, y + 3, bw, 12, 3, isListening ? accB : (hovered ? acc : 0xFF262632));
+            NeonButton.drawSmallText(ctx, textRenderer, badge, bx + 5, y + 6, isListening ? 0xFF121218 : (hovered ? 0xFF121218 : accB), 0.78f);
         } else if (item instanceof ActionRow ar) {
             drawRowBulletIcon(ctx, x + 6, y + 5, accB);
-            NeonButton.drawSmallText(ctx, textRenderer, ar.label(), x + 16, y + 6, 0xFFD8D8EA, 0.80f);
-
+            NeonButton.drawSmallText(ctx, textRenderer, ar.label(), x + 16, y + 6, 0xFFD4D4E6, 0.80f);
             String badge = ar.badgeText().get();
             int bw = Math.round(textRenderer.getWidth(badge) * 0.78f) + 10;
             int bx = x + w - bw - 6;
@@ -796,10 +773,8 @@ public class ArtemScreen extends Screen {
 
     @Override
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
-        ArtemConfig c = ArtemConfig.get();
-
         if (listeningKeybind != null) {
-            if (button == 1) {
+            if (button == 1 || button == 2) {
                 listeningKeybind.setter().accept(0);
                 toast("Бинд очищен");
             }
@@ -814,32 +789,34 @@ public class ArtemScreen extends Screen {
             return true;
         }
 
-        int sx = winX + 7;
-        int sy = winY + 23;
-        if (mouseX >= sx && mouseX <= sx + sideW - 14 && mouseY >= sy && mouseY <= sy + 13) {
+        if (mouseX >= winX + 6 && mouseX <= winX + sideW - 6 && mouseY >= winY + winH - 22 && mouseY <= winY + winH - 4) {
+            activeCategory = Category.THEMES;
+            searchQuery = "";
+            subDetailTitle = null;
+            subDetailRows.clear();
+            scrollOffset = 0;
+            return true;
+        }
+
+        if (subDetailTitle != null && searchQuery.isBlank() && mouseX >= mainX + 10 && mouseX <= mainX + mainW - 45 && mouseY >= winY + 5 && mouseY <= winY + 21) {
+            subDetailTitle = null;
+            subDetailRows.clear();
+            scrollOffset = 0;
+            return true;
+        }
+
+        int sx = winX + 7, sy = winY + 23, sw = sideW - 14;
+        if (mouseX >= sx && mouseX <= sx + sw && mouseY >= sy && mouseY <= sy + 13) {
             searchFocused = true;
-            if (button == 1) searchQuery = "";
             return true;
         } else {
             searchFocused = false;
         }
 
-        int py = winY + winH - 22;
-        if (mouseX >= winX + sideW - 20 && mouseX <= winX + sideW - 4 && mouseY >= py && mouseY <= winY + winH - 4) {
-            activeCategory = Category.THEMES;
-            searchQuery = "";
-            subDetailTitle = null;
-            scrollOffset = 0;
-            return true;
-        }
-
         int cy = winY + 41;
         String lastGroup = "";
         for (Category cat : Category.values()) {
-            if (!cat.group.equals(lastGroup)) {
-                lastGroup = cat.group;
-                cy += 8;
-            }
+            if (!cat.group.equals(lastGroup)) { lastGroup = cat.group; cy += 8; }
             if (mouseX >= winX + 6 && mouseX <= winX + sideW - 6 && mouseY >= cy && mouseY <= cy + 12) {
                 activeCategory = cat;
                 searchQuery = "";
@@ -851,45 +828,50 @@ public class ArtemScreen extends Screen {
             cy += 13;
         }
 
-        if (subDetailTitle != null && mouseX >= mainX + 8 && mouseX <= winX + winW - 26 && mouseY >= winY + 4 && mouseY <= winY + 23) {
-            subDetailTitle = null;
-            subDetailRows.clear();
-            scrollOffset = 0;
-            return true;
-        }
-
         if (mouseX >= listX && mouseX <= listX + listW && mouseY >= listY && mouseY <= listY + listH) {
-            List<RowItem> rows = visibleRows(c);
+            ArtemConfig c = ArtemConfig.get();
             int ry = listY - scrollOffset;
-            for (RowItem item : rows) {
+            for (RowItem item : visibleRows(c)) {
                 int rh = rowHeight(item);
                 if (mouseY >= ry && mouseY <= ry + rh) {
-                    if (item instanceof ToggleRow tr) {
+                    if (item instanceof CrosshairStyleRow) {
+                        int delta = (button == 1) ? -1 : 1;
+                        c.crosshairStyle = Math.floorMod(c.crosshairStyle + delta, HudManager.CROSSHAIR_STYLE_NAMES.length);
+                        c.save();
+                        return true;
+                    } else if (item instanceof ToggleRow tr) {
                         if (button == 1 && tr.onSettings() != null) tr.onSettings().run();
                         else tr.toggler().run();
-                        return true;
-                    } else if (item instanceof KeybindRow kb) {
-                        if (button == 1) {
-                            kb.setter().accept(0);
-                            toast("Бинд очищен");
-                        } else {
-                            listeningKeybind = kb;
-                        }
                         return true;
                     } else if (item instanceof SliderRow sr) {
                         draggingSlider = sr;
                         draggingSliderX = listX + 7;
                         draggingSliderW = listW - 14;
-                        updateSliderFromMouse(sr, mouseX);
+                        updateSlider(sr, mouseX);
                         return true;
-                    } else if (item instanceof SwatchRow swRow) {
-                        int swX = listX + listW - swRow.palette().length * 11 - 5;
-                        for (int col : swRow.palette()) {
-                            if (mouseX >= swX - 1 && mouseX <= swX + 10) {
-                                swRow.setter().accept(col);
+                    } else if (item instanceof SwatchRow swr) {
+                        int[] pal = swr.palette();
+                        int startX = listX + listW - pal.length * 12 - 5;
+                        for (int i = 0; i < pal.length; i++) {
+                            int px = startX + i * 12;
+                            if (mouseX >= px - 1 && mouseX <= px + 10) {
+                                swr.setter().accept(pal[i]);
                                 return true;
                             }
-                            swX += 11;
+                        }
+                        int cur = swr.getter().getAsInt() & 0x00FFFFFF;
+                        int nextIdx = 0;
+                        for (int i = 0; i < pal.length; i++) {
+                            if ((pal[i] & 0x00FFFFFF) == cur) { nextIdx = (i + 1) % pal.length; break; }
+                        }
+                        swr.setter().accept(pal[nextIdx]);
+                        return true;
+                    } else if (item instanceof KeybindRow kr) {
+                        if (button == 1) {
+                            kr.setter().accept(0);
+                            toast("Бинд очищен");
+                        } else {
+                            listeningKeybind = kr;
                         }
                         return true;
                     } else if (item instanceof ActionRow ar) {
@@ -903,10 +885,17 @@ public class ArtemScreen extends Screen {
         return super.mouseClicked(mouseX, mouseY, button);
     }
 
+    private void updateSlider(SliderRow sr, double mouseX) {
+        double norm = Math.max(0.0, Math.min(1.0, (mouseX - draggingSliderX) / Math.max(1.0, draggingSliderW)));
+        double val = sr.min() + norm * (sr.max() - sr.min());
+        if (sr.integer()) val = Math.round(val);
+        sr.setter().accept(val);
+    }
+
     @Override
     public boolean mouseDragged(double mouseX, double mouseY, int button, double deltaX, double deltaY) {
         if (draggingSlider != null) {
-            updateSliderFromMouse(draggingSlider, mouseX);
+            updateSlider(draggingSlider, mouseX);
             return true;
         }
         return super.mouseDragged(mouseX, mouseY, button, deltaX, deltaY);
@@ -918,16 +907,10 @@ public class ArtemScreen extends Screen {
         return super.mouseReleased(mouseX, mouseY, button);
     }
 
-    private void updateSliderFromMouse(SliderRow sr, double mouseX) {
-        double norm = Math.max(0.0, Math.min(1.0, (mouseX - draggingSliderX) / Math.max(1.0, draggingSliderW)));
-        double val = sr.min() + norm * (sr.max() - sr.min());
-        sr.setter().accept(sr.integer() ? Math.round(val) : Math.round(val * 100.0) / 100.0);
-    }
-
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double horizontalAmount, double verticalAmount) {
         if (maxScroll > 0) {
-            scrollOffset = Math.max(0, Math.min(maxScroll, scrollOffset - (int) (verticalAmount * 16)));
+            scrollOffset = Math.max(0, Math.min(maxScroll, scrollOffset - (int) Math.round(verticalAmount * 14)));
             return true;
         }
         return super.mouseScrolled(mouseX, mouseY, horizontalAmount, verticalAmount);
@@ -936,7 +919,7 @@ public class ArtemScreen extends Screen {
     @Override
     public boolean charTyped(char chr, int modifiers) {
         if (listeningKeybind != null) return true;
-        if (searchFocused && chr >= 32 && searchQuery.length() < 24) {
+        if (searchFocused && chr >= 32) {
             searchQuery += chr;
             scrollOffset = 0;
             return true;
@@ -947,7 +930,7 @@ public class ArtemScreen extends Screen {
     @Override
     public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
         if (listeningKeybind != null) {
-            if (keyCode == GLFW.GLFW_KEY_ESCAPE || keyCode == GLFW.GLFW_KEY_DELETE || keyCode == GLFW.GLFW_KEY_BACKSPACE) {
+            if (keyCode == GLFW.GLFW_KEY_ESCAPE || keyCode == GLFW.GLFW_KEY_BACKSPACE || keyCode == GLFW.GLFW_KEY_DELETE) {
                 listeningKeybind.setter().accept(0);
                 toast("Бинд очищен");
             } else {
@@ -964,11 +947,11 @@ public class ArtemScreen extends Screen {
                 scrollOffset = 0;
                 return true;
             }
-            if (keyCode == GLFW.GLFW_KEY_ESCAPE || keyCode == GLFW.GLFW_KEY_ENTER) {
+            if (keyCode == GLFW.GLFW_KEY_ESCAPE) {
+                if (!searchQuery.isEmpty()) { searchQuery = ""; return true; }
                 searchFocused = false;
                 return true;
             }
-            return true;
         }
         if (keyCode == GLFW.GLFW_KEY_ESCAPE && subDetailTitle != null) {
             subDetailTitle = null;
@@ -979,20 +962,26 @@ public class ArtemScreen extends Screen {
         return super.keyPressed(keyCode, scanCode, modifiers);
     }
 
+    @Override
+    public boolean shouldPause() { return false; }
+
+    @Override
+    public void close() {
+        if (client != null) client.setScreen(parent);
+    }
+
     private void drawStarLogo(DrawContext ctx, int x, int y, int col) {
-        ctx.fill(x + 3, y, x + 4, y + 7, col);
-        ctx.fill(x, y + 3, x + 7, y + 4, col);
-        ctx.fill(x + 1, y + 1, x + 2, y + 2, col);
-        ctx.fill(x + 5, y + 1, x + 6, y + 2, col);
-        ctx.fill(x + 1, y + 5, x + 2, y + 6, col);
-        ctx.fill(x + 5, y + 5, x + 6, y + 6, col);
+        ctx.fill(x + 3, y, x + 5, y + 8, col);
+        ctx.fill(x, y + 3, x + 8, y + 5, col);
+        ctx.fill(x + 1, y + 1, x + 7, y + 7, (col & 0x00FFFFFF) | 0x66000000);
+        ctx.fill(x + 3, y + 3, x + 5, y + 5, 0xFFFFFFFF);
     }
 
     private void drawSearchIcon(DrawContext ctx, int x, int y, int col) {
         ctx.fill(x + 1, y, x + 4, y + 1, col);
-        ctx.fill(x + 1, y + 4, x + 4, y + 5, col);
         ctx.fill(x, y + 1, x + 1, y + 4, col);
         ctx.fill(x + 4, y + 1, x + 5, y + 4, col);
+        ctx.fill(x + 1, y + 4, x + 4, y + 5, col);
         ctx.fill(x + 4, y + 4, x + 6, y + 6, col);
     }
 
@@ -1005,61 +994,77 @@ public class ArtemScreen extends Screen {
     }
 
     private void drawGearIcon(DrawContext ctx, int x, int y, int col) {
-        ctx.fill(x + 2, y + 1, x + 5, y + 6, col);
-        ctx.fill(x + 1, y + 2, x + 6, y + 5, col);
-        ctx.fill(x + 3, y + 3, x + 4, y + 4, 0xFF111116);
+        ctx.fill(x + 2, y, x + 5, y + 7, col);
+        ctx.fill(x, y + 2, x + 7, y + 5, col);
+        ctx.fill(x + 2, y + 2, x + 5, y + 5, 0xFF111116);
     }
 
     private void drawRowBulletIcon(DrawContext ctx, int x, int y, int col) {
-        ctx.fill(x + 1, y + 1, x + 6, y + 6, (col & 0x00FFFFFF) | 0x33000000);
-        ctx.fill(x + 2, y + 2, x + 5, y + 5, col);
+        ctx.fill(x + 1, y, x + 6, y + 1, col);
+        ctx.fill(x, y + 1, x + 1, y + 6, col);
+        ctx.fill(x + 6, y + 1, x + 7, y + 6, col);
+        ctx.fill(x + 1, y + 6, x + 6, y + 7, col);
+        ctx.fill(x + 2, y + 2, x + 5, y + 5, (col & 0x00FFFFFF) | 0x55000000);
     }
 
     private void drawCategoryIcon(DrawContext ctx, Category cat, int x, int y, int col) {
         switch (cat) {
-            case MAIN -> drawHomeIcon(ctx, x, y, col);
-            case HELPERS -> drawStarLogo(ctx, x, y, col);
-            case AUCTION -> {
-                ctx.fill(x + 1, y + 2, x + 6, y + 6, col);
-                ctx.fill(x + 2, y + 1, x + 5, y + 2, col);
+            case MAIN -> {
+                ctx.fill(x + 1, y, x + 6, y + 1, col);
+                ctx.fill(x, y + 1, x + 1, y + 6, col);
+                ctx.fill(x + 6, y + 1, x + 7, y + 6, col);
+                ctx.fill(x + 1, y + 6, x + 6, y + 7, col);
+                ctx.fill(x + 3, y + 2, x + 4, y + 5, col);
+                ctx.fill(x + 2, y + 3, x + 5, y + 4, col);
             }
-            case OPTIMIZE -> drawGearIcon(ctx, x, y, col);
+            case HELPERS -> {
+                ctx.fill(x + 2, y, x + 5, y + 1, col);
+                ctx.fill(x + 1, y + 1, x + 6, y + 5, col);
+                ctx.fill(x + 2, y + 5, x + 5, y + 7, col);
+            }
+            case AUCTION -> {
+                ctx.fill(x, y + 2, x + 7, y + 7, col);
+                ctx.fill(x + 2, y, x + 5, y + 2, col);
+                ctx.fill(x + 3, y + 4, x + 4, y + 5, 0xFF111116);
+            }
+            case OPTIMIZE -> {
+                ctx.fill(x + 3, y, x + 6, y + 2, col);
+                ctx.fill(x + 1, y + 2, x + 5, y + 4, col);
+                ctx.fill(x + 2, y + 4, x + 4, y + 7, col);
+            }
             case VISUALS -> {
-                ctx.fill(x + 1, y + 2, x + 6, y + 5, col);
+                ctx.fill(x + 1, y + 1, x + 6, y + 2, col);
+                ctx.fill(x, y + 2, x + 7, y + 5, col);
+                ctx.fill(x + 1, y + 5, x + 6, y + 6, col);
                 ctx.fill(x + 3, y + 3, x + 4, y + 4, 0xFF111116);
             }
             case HUD -> {
-                ctx.fill(x, y + 1, x + 7, y + 2, col);
-                ctx.fill(x, y + 5, x + 7, y + 6, col);
-                ctx.fill(x, y + 1, x + 1, y + 6, col);
-                ctx.fill(x + 6, y + 1, x + 7, y + 6, col);
+                ctx.fill(x, y + 1, x + 7, y + 6, col);
+                ctx.fill(x + 1, y + 2, x + 6, y + 5, 0xFF111116);
+                ctx.fill(x + 2, y + 3, x + 5, y + 4, col);
             }
             case CONFIGS -> {
-                ctx.fill(x + 1, y, x + 6, y + 7, col);
-                ctx.fill(x + 2, y + 2, x + 5, y + 3, 0xFF111116);
+                ctx.fill(x, y + 1, x + 3, y + 2, col);
+                ctx.fill(x, y + 2, x + 7, y + 6, col);
             }
             case FRIENDS -> {
-                ctx.fill(x + 1, y + 1, x + 3, y + 3, col);
-                ctx.fill(x + 4, y + 1, x + 6, y + 3, col);
-                ctx.fill(x, y + 4, x + 4, y + 6, col);
-                ctx.fill(x + 4, y + 4, x + 7, y + 6, col);
+                ctx.fill(x + 2, y + 1, x + 5, y + 3, col);
+                ctx.fill(x + 1, y + 4, x + 6, y + 7, col);
             }
             case EVENTS -> {
-                ctx.fill(x + 1, y + 1, x + 6, y + 6, col);
-                ctx.fill(x + 3, y + 2, x + 4, y + 4, 0xFF111116);
-                ctx.fill(x + 3, y + 4, x + 5, y + 5, 0xFF111116);
+                ctx.fill(x + 1, y + 1, x + 6, y + 2, col);
+                ctx.fill(x + 1, y + 2, x + 6, y + 6, col);
+                ctx.fill(x + 2, y + 3, x + 5, y + 5, 0xFF111116);
             }
-            case WAYPOINTS -> NeonButton.drawCircle(ctx, x + 3, y + 3, 3, col);
+            case WAYPOINTS -> {
+                ctx.fill(x + 2, y, x + 5, y + 4, col);
+                ctx.fill(x + 3, y + 4, x + 4, y + 7, col);
+            }
             case THEMES -> {
                 ctx.fill(x + 1, y + 1, x + 6, y + 6, col);
                 ctx.fill(x + 2, y + 2, x + 3, y + 3, 0xFF111116);
                 ctx.fill(x + 4, y + 4, x + 5, y + 5, 0xFF111116);
             }
         }
-    }
-
-    @Override
-    public boolean shouldPause() {
-        return false;
     }
 }
