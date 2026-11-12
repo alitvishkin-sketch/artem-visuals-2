@@ -22,6 +22,7 @@ import net.minecraft.entity.ItemEntity;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.entity.mob.MobEntity;
 import net.minecraft.entity.player.PlayerEntity;
+import net.minecraft.entity.projectile.ProjectileEntity;
 import net.minecraft.particle.ParticleTypes;
 import net.minecraft.registry.tag.FluidTags;
 import net.minecraft.util.ActionResult;
@@ -34,13 +35,11 @@ import net.minecraft.util.shape.VoxelShape;
 
 import java.util.*;
 
-/**
- * Все 3D и 2D визуальные эффекты ARTEM VISUALS 3.0.
- */
 public final class EffectManager {
     private static final Random RNG = new Random();
     private static final List<JumpRing> RINGS = new ArrayList<>();
     private static final LinkedList<Vec3d> TRAIL_POINTS = new LinkedList<>();
+    private static final Map<Integer, LinkedList<Vec3d>> PROJECTILE_TRAILS = new HashMap<>();
     private static final List<DamagePopup> DAMAGE_POPUPS = new ArrayList<>();
     private static final Map<Integer, Float> LAST_HEALTH_MAP = new HashMap<>();
     private static boolean wasOnGround = true;
@@ -55,17 +54,30 @@ public final class EffectManager {
 
         AttackEntityCallback.EVENT.register((player, world, hand, entity, hitResult) -> {
             ArtemConfig c = ArtemConfig.get();
-            if (world != null && world.isClient && c.hitParticles && entity != null) {
-                int count = Math.max(4, c.hitParticlesCount);
-                for (int i = 0; i < count; i++) {
-                    double ox = entity.getX() + (RNG.nextDouble() - 0.5) * 0.9;
-                    double oy = entity.getY() + 0.4 + RNG.nextDouble() * entity.getHeight() * 0.7;
-                    double oz = entity.getZ() + (RNG.nextDouble() - 0.5) * 0.9;
-                    world.addParticle(i % 2 == 0 ? ParticleTypes.END_ROD : ParticleTypes.ENCHANT,
-                            ox, oy, oz,
-                            (RNG.nextDouble() - 0.5) * 0.22,
-                            0.06 + RNG.nextDouble() * 0.14,
-                            (RNG.nextDouble() - 0.5) * 0.22);
+            if (world != null && world.isClient && entity != null) {
+                if (c.hitParticles) {
+                    int count = Math.max(4, c.hitParticlesCount);
+                    for (int i = 0; i < count; i++) {
+                        double ox = entity.getX() + (RNG.nextDouble() - 0.5) * 0.9;
+                        double oy = entity.getY() + 0.4 + RNG.nextDouble() * entity.getHeight() * 0.7;
+                        double oz = entity.getZ() + (RNG.nextDouble() - 0.5) * 0.9;
+                        world.addParticle(i % 2 == 0 ? ParticleTypes.END_ROD : ParticleTypes.ENCHANT,
+                                ox, oy, oz,
+                                (RNG.nextDouble() - 0.5) * 0.22,
+                                0.06 + RNG.nextDouble() * 0.14,
+                                (RNG.nextDouble() - 0.5) * 0.22);
+                    }
+                }
+                if (c.critSparks) {
+                    for (int i = 0; i < 8; i++) {
+                        world.addParticle(ParticleTypes.CRIT,
+                                entity.getX() + (RNG.nextDouble() - 0.5) * 0.6,
+                                entity.getY() + entity.getHeight() * 0.55,
+                                entity.getZ() + (RNG.nextDouble() - 0.5) * 0.6,
+                                (RNG.nextDouble() - 0.5) * 0.35,
+                                0.12 + RNG.nextDouble() * 0.2,
+                                (RNG.nextDouble() - 0.5) * 0.35);
+                    }
                 }
             }
             return ActionResult.PASS;
@@ -90,6 +102,7 @@ public final class EffectManager {
         if (client == null || client.world == null || client.player == null) {
             RINGS.clear();
             TRAIL_POINTS.clear();
+            PROJECTILE_TRAILS.clear();
             DAMAGE_POPUPS.clear();
             LAST_HEALTH_MAP.clear();
             return;
@@ -109,6 +122,22 @@ public final class EffectManager {
                 default -> 18000L;
             };
             client.world.setTimeOfDay(targetTime);
+        }
+
+        // Шлейфы стрел, жемчуга и снежков
+        if (c.projectileTrails) {
+            Set<Integer> aliveIds = new HashSet<>();
+            for (Entity e : client.world.getEntities()) {
+                if (e instanceof ProjectileEntity && !e.isOnGround() && e.squaredDistanceTo(client.player) < 96 * 96) {
+                    aliveIds.add(e.getId());
+                    LinkedList<Vec3d> pts = PROJECTILE_TRAILS.computeIfAbsent(e.getId(), k -> new LinkedList<>());
+                    pts.addLast(e.getPos());
+                    while (pts.size() > 18) pts.removeFirst();
+                }
+            }
+            PROJECTILE_TRAILS.keySet().retainAll(aliveIds);
+        } else {
+            PROJECTILE_TRAILS.clear();
         }
 
         if (c.damageIndicator) {
@@ -201,6 +230,13 @@ public final class EffectManager {
         int sw = mc.getWindow().getScaledWidth();
         int sh = mc.getWindow().getScaledHeight();
 
+        // Мягкая кинематографичная виньетка по краям экрана
+        if (c.screenVignette) {
+            int vig = 0x2605050A;
+            ctx.fillGradient(0, 0, sw, 18, vig, 0x00000000);
+            ctx.fillGradient(0, sh - 18, sw, sh, 0x00000000, vig);
+        }
+
         if (c.worldCustomizer && c.colorCorrection) {
             ctx.fill(0, 0, sw, sh, (NeonButton.ACCENT & 0x00FFFFFF) | 0x16000000);
         }
@@ -229,15 +265,15 @@ public final class EffectManager {
                     String distTxt = c.nameTagsDistance ? String.format(" [%dm]", Math.round(Math.sqrt(distSq))) : "";
                     String full = name + hpTxt + distTxt;
 
-                    int tw = mc.textRenderer.getWidth(full) + 10;
-                    int th = 14;
+                    int tw = mc.textRenderer.getWidth(full) + 8;
+                    int th = 12;
                     int px = (int) Math.round(screen[0] - tw / 2.0);
                     int py = (int) Math.round(screen[1] - th);
 
-                    NeonButton.fillSmoothRounded(ctx, px, py, tw, th, 4, NeonButton.WINDOW_TOP);
-                    NeonButton.drawSmoothRoundedOutline(ctx, px, py, tw, th, 4, (NeonButton.ACCENT & 0x00FFFFFF) | 0x55000000);
+                    NeonButton.fillSmoothRounded(ctx, px, py, tw, th, 3, NeonButton.HUD_BG_TOP);
+                    NeonButton.drawSmoothRoundedOutline(ctx, px, py, tw, th, 3, (NeonButton.HUD_ACCENT & 0x00FFFFFF) | 0x55000000);
 
-                    int tx = px + 5, ty = py + 3;
+                    int tx = px + 4, ty = py + 2;
                     ctx.drawText(mc.textRenderer, name, tx, ty, 0xFFF4F4FC, false);
                     tx += mc.textRenderer.getWidth(name);
                     if (!hpTxt.isEmpty()) {
@@ -253,11 +289,11 @@ public final class EffectManager {
                     if (screen == null) continue;
                     String label = item.getStack().getName().getString();
                     if (item.getStack().getCount() > 1) label += " x" + item.getStack().getCount();
-                    int tw = mc.textRenderer.getWidth(label) + 8;
+                    int tw = mc.textRenderer.getWidth(label) + 6;
                     int px = (int) Math.round(screen[0] - tw / 2.0);
-                    int py = (int) Math.round(screen[1] - 12);
-                    NeonButton.fillSmoothRounded(ctx, px, py, tw, 12, 3, NeonButton.WINDOW_TOP);
-                    ctx.drawText(mc.textRenderer, label, px + 4, py + 2, NeonButton.getDynamicColor(c.itemEspColor, 0), false);
+                    int py = (int) Math.round(screen[1] - 11);
+                    NeonButton.fillSmoothRounded(ctx, px, py, tw, 11, 3, NeonButton.HUD_BG_TOP);
+                    ctx.drawText(mc.textRenderer, label, px + 3, py + 2, NeonButton.getDynamicColor(c.itemEspColor, 0), false);
                 }
             }
         }
@@ -332,6 +368,19 @@ public final class EffectManager {
                 }
                 if (c.entityHighlight && !(e instanceof PlayerEntity)) {
                     drawBoxColor(matrices, lines, box.expand(0.02), NeonButton.getDynamicColor(c.entityHighlightColor, 0), 0.75f * pulse);
+                }
+            }
+        }
+
+        // Шлейфы снарядов
+        if (c.projectileTrails && !PROJECTILE_TRAILS.isEmpty()) {
+            for (LinkedList<Vec3d> pts : PROJECTILE_TRAILS.values()) {
+                int total = pts.size(), idx = 0;
+                for (Vec3d pt : pts) {
+                    int col = NeonButton.getDynamicColor(c.trailColor, idx * 60);
+                    float alpha = (idx++ / (float) Math.max(1, total)) * 0.90f;
+                    double px = pt.x - cam.x, py = pt.y - cam.y, pz = pt.z - cam.z;
+                    drawBoxColor(matrices, lines, new Box(px - 0.02, py - 0.02, pz - 0.02, px + 0.02, py + 0.02, pz + 0.02), col, alpha);
                 }
             }
         }
