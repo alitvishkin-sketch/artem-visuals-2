@@ -8,7 +8,7 @@ jobs:
       - name: Organize files
         run: |
           mkdir -p gradle/wrapper
-          mkdir -p src/main/java/com/artem/visuals/{config,crosshair,effects,gui,hud,optimize}
+          mkdir -p src/main/java/com/artem/visuals/{config,crosshair,effects,gui,hud,mixin,optimize}
           mkdir -p src/main/resources/assets/artemvisuals/lang
           mv gradle-wrapper.properties gradle/wrapper/
           mv ArtemVisualsClient.java src/main/java/com/artem/visuals/
@@ -17,8 +17,9 @@ jobs:
           mv EffectManager.java src/main/java/com/artem/visuals/effects/
           mv ArtemScreen.java NeonButton.java src/main/java/com/artem/visuals/gui/
           mv HudElement.java HudManager.java src/main/java/com/artem/visuals/hud/
+          mv *Mixin.java src/main/java/com/artem/visuals/mixin/
           mv Optimizer.java src/main/java/com/artem/visuals/optimize/
-          mv fabric.mod.json src/main/resources/
+          mv fabric.mod.json artemvisuals.mixins.json src/main/resources/
           mv icon.png src/main/resources/assets/artemvisuals/
           mv en_us.json ru_ru.json src/main/resources/assets/artemvisuals/lang/
       - uses: actions/setup-java@v4
