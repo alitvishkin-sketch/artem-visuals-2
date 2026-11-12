@@ -6,7 +6,7 @@ import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.DrawContext;
 
 /**
- * Кастомный прицел поверх ванильного (ванильный можно скрыть через настройки игры).
+ * Чёткий кастомный прицел с ровным кольцом и центральной точкой.
  */
 public final class CrosshairRenderer {
     private CrosshairRenderer() {}
@@ -16,7 +16,6 @@ public final class CrosshairRenderer {
         if (!c.customCrosshair) return;
         MinecraftClient mc = MinecraftClient.getInstance();
         if (mc == null || mc.options.hudHidden || mc.player == null) return;
-        // Не рисуем поверх меню/инвентаря
         if (mc.currentScreen != null) return;
 
         int cx = mc.getWindow().getScaledWidth() / 2;
@@ -32,7 +31,7 @@ public final class CrosshairRenderer {
             size += 1;
         }
 
-        int outline = c.crosshairOutline ? 0xFF000000 : 0;
+        int outline = c.crosshairOutline ? 0xDD000000 : 0;
 
         switch (c.crosshairStyle) {
             case 1 -> drawDot(ctx, cx, cy, size, color, outline);
@@ -43,36 +42,45 @@ public final class CrosshairRenderer {
     }
 
     private static void drawCross(DrawContext ctx, int cx, int cy, int size, int gap, int th, int color, int outline) {
-        // horizontal
-        fillRect(ctx, cx - gap - size, cy - th / 2, size, th, color, outline);
-        fillRect(ctx, cx + gap, cy - th / 2, size, th, color, outline);
-        // vertical
-        fillRect(ctx, cx - th / 2, cy - gap - size, th, size, color, outline);
-        fillRect(ctx, cx - th / 2, cy + gap, th, size, color, outline);
+        int half = th / 2;
+        // Левая и правая линии
+        fillRect(ctx, cx - gap - size, cy - half, size, th, color, outline);
+        fillRect(ctx, cx + gap + (th % 2), cy - half, size, th, color, outline);
+        // Верхняя и нижняя линии
+        fillRect(ctx, cx - half, cy - gap - size, th, size, color, outline);
+        fillRect(ctx, cx - half, cy + gap + (th % 2), th, size, color, outline);
+        // Аккуратная центральная точка при зазоре
+        if (gap >= 2) {
+            fillRect(ctx, cx - half, cy - half, th, th, color, outline);
+        }
     }
 
     private static void drawPlus(DrawContext ctx, int cx, int cy, int size, int gap, int th, int color, int outline) {
-        fillRect(ctx, cx - size, cy - th / 2, size * 2, th, color, outline);
-        fillRect(ctx, cx - th / 2, cy - size, th, size * 2, color, outline);
+        int half = th / 2;
+        fillRect(ctx, cx - size, cy - half, size * 2 + (th % 2), th, color, outline);
+        fillRect(ctx, cx - half, cy - size, th, size * 2 + (th % 2), color, outline);
     }
 
     private static void drawDot(DrawContext ctx, int cx, int cy, int size, int color, int outline) {
-        int s = Math.max(2, size / 2);
-        fillRect(ctx, cx - s, cy - s, s * 2, s * 2, color, outline);
+        int s = Math.max(1, size / 3);
+        fillRect(ctx, cx - s, cy - s, s * 2 + 1, s * 2 + 1, color, outline);
     }
 
     private static void drawCircle(DrawContext ctx, int cx, int cy, int radius, int color, int outline) {
-        // Простая окружность точками (без лишних зависимостей)
-        for (int a = 0; a < 360; a += 8) {
+        int r = Math.max(3, radius);
+        // Сплошное кольцо с шагом 1 градус
+        for (int a = 0; a < 360; a++) {
             double rad = Math.toRadians(a);
-            int x = cx + (int) Math.round(Math.cos(rad) * radius);
-            int y = cy + (int) Math.round(Math.sin(rad) * radius);
-            ctx.fill(x, y, x + 1, y + 1, color);
+            int x = cx + (int) Math.round(Math.cos(rad) * r);
+            int y = cy + (int) Math.round(Math.sin(rad) * r);
             if (outline != 0) {
-                ctx.fill(x - 1, y, x, y + 1, outline);
-                ctx.fill(x + 1, y, x + 2, y + 1, outline);
+                ctx.fill(x - 1, y, x + 2, y + 1, outline);
+                ctx.fill(x, y - 1, x + 1, y + 2, outline);
             }
+            ctx.fill(x, y, x + 1, y + 1, color);
         }
+        // Центральная точка
+        fillRect(ctx, cx, cy, 1, 1, color, outline);
     }
 
     private static void fillRect(DrawContext ctx, int x, int y, int w, int h, int color, int outline) {
@@ -88,7 +96,7 @@ public final class CrosshairRenderer {
         int gap = c.crosshairGap;
         int th = Math.max(1, c.crosshairThickness);
         int color = c.crosshairColor;
-        int outline = c.crosshairOutline ? 0xFF000000 : 0;
+        int outline = c.crosshairOutline ? 0xDD000000 : 0;
         switch (c.crosshairStyle) {
             case 1 -> drawDot(ctx, cx, cy, size, color, outline);
             case 2 -> drawCircle(ctx, cx, cy, size, color, outline);
