@@ -151,15 +151,14 @@ public class ArtemConfig {
     // Меч, ракурс и анимация удара
     public boolean smallSword = true;
     public boolean onlyWeapons = false;
-    public float swordScale = 0.72f;
-    public float swordOffsetX = 0.04f;
+    public float swordScale = 0.65f;
+    public float swordOffsetX = 0.03f;
     public float swordOffsetY = -0.04f;
-    public float swordOffsetZ = -0.06f;
+    public float swordOffsetZ = -0.05f;
     public float swordRotX = 0.0f;
     public float swordRotY = 0.0f;
     public float swordRotZ = 0.0f;
-    public int swingStyle = 1; // 0=Обычный, 1=Плавный, 2=Снизу вверх, 3=Веер, 4=Укол, 5=Круговой 360
-    public float swingSpeed = 1.0f;
+    public int swingStyle = 1; // 0 = Обычный, 1 = Плавный боковой, 2 = Блок-хит 1.7, 3 = Резкий выпад, 4 = Круговой
     public boolean handGlow = true;
 
     public boolean noHurtCam = true;
@@ -168,17 +167,16 @@ public class ArtemConfig {
     public boolean screenVignette = true;
     public boolean critSparks = true;
 
-    // Кастомный прицел (8 гладких стилей)
+    // Кастомный гладкий прицел (8 стилей)
     public boolean customCrosshair = true;
     public int crosshairStyle = 0;
     public int crosshairSize = 5;
     public int crosshairGap = 3;
-    public float crosshairThickness = 1.4f;
+    public int crosshairThickness = 1;
+    public boolean crosshairDot = true;
     public int crosshairColor = 0xFFE8E8F4;
     public boolean crosshairOutline = true;
     public boolean crosshairDynamic = true;
-    public boolean crosshairDot = true;
-    public boolean crosshairCooldownRing = true;
 
     // Visual модули
     public boolean esp = false;
@@ -293,16 +291,11 @@ public class ArtemConfig {
                     if (cfg.waypoints == null) cfg.waypoints = new ArrayList<>();
                     if (cfg.configVersion < 36) {
                         cfg.configVersion = 36;
+                        cfg.showPearlHud = true;
                         cfg.pearlTimer = true;
                         cfg.pearlTrajectory = true;
-                        cfg.showPearlHud = true;
-                        cfg.trapPlastPreview = true;
                         cfg.crosshairDot = true;
-                        cfg.crosshairCooldownRing = true;
-                        if (cfg.crosshairThickness < 0.8f) cfg.crosshairThickness = 1.4f;
-                        if (cfg.swingSpeed < 0.2f) cfg.swingSpeed = 1.0f;
-                        if (cfg.trapPlastWidth < 3) cfg.trapPlastWidth = 5;
-                        if (cfg.trapPlastHeight < 2) cfg.trapPlastHeight = 4;
+                        if (cfg.swingStyle == 0) cfg.swingStyle = 1;
                         cfg.save();
                     }
                     return cfg;
