@@ -5,13 +5,10 @@ import com.artem.visuals.gui.NeonButton;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.DrawContext;
 
-/**
- * Базовый перетаскиваемый и масштабируемый элемент HUD с чётким текстом 1.0f без мыла.
- */
 public abstract class HudElement {
     public final String id;
-    protected int width = 56;
-    protected int height = 16;
+    protected int width = 46;
+    protected int height = 13;
     private boolean dragging;
     private int dragOffsetX, dragOffsetY;
 
@@ -26,8 +23,12 @@ public abstract class HudElement {
     protected void measure(MinecraftClient mc) {
         String text = getText(mc);
         int textW = mc.textRenderer.getWidth(text);
-        width = Math.max(44, textW + 14);
-        height = 16;
+        width = Math.max(36, textW + 10);
+        height = 13;
+    }
+
+    protected float effectiveScale(ArtemConfig c, ArtemConfig.HudPos pos) {
+        return Math.max(0.45f, Math.min(1.50f, pos.scale * c.hudScale));
     }
 
     public void render(DrawContext ctx, MinecraftClient mc, ArtemConfig c) {
@@ -37,15 +38,15 @@ public abstract class HudElement {
         if (width <= 0 || height <= 0) return;
 
         ArtemConfig.HudPos pos = c.getHudPos(id, defaultX(), defaultY());
-        float s = Math.max(0.75f, Math.min(1.50f, pos.scale));
+        float s = effectiveScale(c, pos);
         int x = pos.x;
         int y = pos.y;
 
         if (Math.abs(s - 1.0f) < 0.02f) {
             renderBody(ctx, mc, c, x, y);
             if (c.hudEditMode) {
-                int border = dragging ? NeonButton.ACCENT_BRIGHT : ((NeonButton.ACCENT & 0x00FFFFFF) | 0x88000000);
-                NeonButton.drawSmoothRoundedOutline(ctx, x, y, width, height, 5, border);
+                int border = dragging ? NeonButton.HUD_ACCENT_BRIGHT : ((NeonButton.HUD_ACCENT & 0x00FFFFFF) | 0x99000000);
+                NeonButton.drawSmoothRoundedOutline(ctx, x, y, width, height, 4, border);
             }
         } else {
             ctx.getMatrices().push();
@@ -53,8 +54,8 @@ public abstract class HudElement {
             ctx.getMatrices().scale(s, s, 1f);
             renderBody(ctx, mc, c, 0, 0);
             if (c.hudEditMode) {
-                int border = dragging ? NeonButton.ACCENT_BRIGHT : ((NeonButton.ACCENT & 0x00FFFFFF) | 0x88000000);
-                NeonButton.drawSmoothRoundedOutline(ctx, 0, 0, width, height, 5, border);
+                int border = dragging ? NeonButton.HUD_ACCENT_BRIGHT : ((NeonButton.HUD_ACCENT & 0x00FFFFFF) | 0x99000000);
+                NeonButton.drawSmoothRoundedOutline(ctx, 0, 0, width, height, 4, border);
             }
             ctx.getMatrices().pop();
         }
@@ -62,27 +63,27 @@ public abstract class HudElement {
 
     protected void renderBody(DrawContext ctx, MinecraftClient mc, ArtemConfig c, int x, int y) {
         String text = getText(mc);
-        int accentColor = getColor(mc);
+        int accentColor = NeonButton.getHudAccentBright(id.hashCode() * 110);
 
-        NeonButton.fillGradientRounded(ctx, x, y, width, height, 5, NeonButton.WINDOW_TOP, NeonButton.WINDOW_BOTTOM);
-        NeonButton.drawSmoothRoundedOutline(ctx, x, y, width, height, 5, 0x1EFFFFFF);
+        NeonButton.fillGradientRounded(ctx, x, y, width, height, 4, NeonButton.HUD_BG_TOP, NeonButton.HUD_BG_BOTTOM);
+        NeonButton.drawSmoothRoundedOutline(ctx, x, y, width, height, 4, (NeonButton.HUD_ACCENT & 0x00FFFFFF) | 0x38000000);
 
         int spaceIdx = text.indexOf(' ');
         if (spaceIdx > 0 && spaceIdx < text.length() - 1) {
             String key = text.substring(0, spaceIdx);
             String val = text.substring(spaceIdx + 1).trim();
-            ctx.drawText(mc.textRenderer, key, x + 7, y + 4, 0xFF8C8CA4, false);
+            ctx.drawText(mc.textRenderer, key, x + 5, y + 3, 0xFF9A9AB2, false);
             int keyW = mc.textRenderer.getWidth(key + " ");
-            ctx.drawText(mc.textRenderer, val, x + 7 + keyW, y + 4, accentColor, false);
+            ctx.drawText(mc.textRenderer, val, x + 5 + keyW, y + 3, accentColor, false);
         } else {
-            ctx.drawText(mc.textRenderer, text, x + 7, y + 4, accentColor, false);
+            ctx.drawText(mc.textRenderer, text, x + 5, y + 3, accentColor, false);
         }
     }
 
     public boolean isHoveredScaled(double mx, double my, ArtemConfig c) {
         if (!isEnabled(c) || width <= 0 || height <= 0) return false;
         ArtemConfig.HudPos pos = c.getHudPos(id, defaultX(), defaultY());
-        float s = Math.max(0.75f, Math.min(1.50f, pos.scale));
+        float s = effectiveScale(c, pos);
         return mx >= pos.x && mx <= pos.x + width * s && my >= pos.y && my <= pos.y + height * s;
     }
 
@@ -99,7 +100,7 @@ public abstract class HudElement {
         if (!c.hudEditMode || !isHoveredScaled(mx, my, c)) return false;
         ArtemConfig.HudPos pos = c.getHudPos(id, defaultX(), defaultY());
         float next = pos.scale + (amount > 0 ? 0.08f : -0.08f);
-        pos.scale = Math.max(0.75f, Math.min(1.50f, Math.round(next * 100f) / 100f));
+        pos.scale = Math.max(0.55f, Math.min(1.50f, Math.round(next * 100f) / 100f));
         c.save();
         return true;
     }
@@ -114,7 +115,7 @@ public abstract class HudElement {
     public void mouseDragged(double mx, double my, ArtemConfig c) {
         if (!dragging) return;
         ArtemConfig.HudPos pos = c.getHudPos(id, defaultX(), defaultY());
-        float s = Math.max(0.75f, Math.min(1.50f, pos.scale));
+        float s = effectiveScale(c, pos);
         pos.x = (int) mx - dragOffsetX;
         pos.y = (int) my - dragOffsetY;
 
