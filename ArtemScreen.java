@@ -27,7 +27,7 @@ import java.util.function.Supplier;
 
 public class ArtemScreen extends Screen {
     private enum Category {
-        MAIN("Основное", "Основные", null, "Общее"),
+        MAIN("Основное", "Основные", null, "Меч, удар и прицел"),
         HELPERS("Хелперы", "Основные", "New", "Помощник"),
         AUCTION("Аукцион", "Основные", "Updated", "Фантайм"),
         OPTIMIZE("Оптимизация", "Основные", null, "Производительность"),
@@ -72,7 +72,7 @@ public class ArtemScreen extends Screen {
     };
 
     private final Screen parent;
-    private Category activeCategory = Category.HELPERS;
+    private Category activeCategory = Category.MAIN;
     private String searchQuery = "";
     private boolean searchFocused = false;
     private String statusToast = "";
@@ -134,32 +134,95 @@ public class ArtemScreen extends Screen {
         return InputUtil.Type.KEYSYM.createFromCode(keyCode).getLocalizedText().getString().toUpperCase(Locale.ROOT);
     }
 
+    private String swingStyleName(int style) {
+        return switch (style) {
+            case 1 -> "Плавный (Smooth)";
+            case 2 -> "Снизу вверх (Bonk)";
+            case 3 -> "Веер / Вбок";
+            case 4 -> "Укол (Stab)";
+            case 5 -> "Круговой 360°";
+            default -> "Обычный (Vanilla)";
+        };
+    }
+
+    private String crosshairStyleName(int style) {
+        return switch (style) {
+            case 1 -> "Неоновое кольцо";
+            case 2 -> "Круг перезарядки";
+            case 3 -> "Шеврон (V-прицел)";
+            case 4 -> "X-Крест (45°)";
+            case 5 -> "Треугольник (Delta)";
+            case 6 -> "Двойная дуга";
+            case 7 -> "Точка с ореолом";
+            default -> "Гладкий крест";
+        };
+    }
+
     private List<RowItem> buildAllRows(ArtemConfig c) {
         List<RowItem> all = new ArrayList<>();
         MinecraftClient mc = MinecraftClient.getInstance();
 
-        // === ОСНОВНОЕ ===
-        all.add(new ToggleRow("Маленький меч (SmallSword)", Category.MAIN, () -> c.smallSword, () -> { c.smallSword = !c.smallSword; c.save(); }, null));
-        all.add(new ToggleRow("Уменьшать только оружие", Category.MAIN, () -> c.onlyWeapons, () -> { c.onlyWeapons = !c.onlyWeapons; c.save(); }, null));
-        all.add(new SliderRow("Размер предмета в руке", Category.MAIN, 0.25, 1.25, false, () -> c.swordScale, v -> { c.swordScale = (float) v; c.save(); }));
-        all.add(new SliderRow("Смещение по X", Category.MAIN, -0.40, 0.40, false, () -> c.swordOffsetX, v -> { c.swordOffsetX = (float) v; c.save(); }));
-        all.add(new SliderRow("Смещение по Y", Category.MAIN, -0.40, 0.40, false, () -> c.swordOffsetY, v -> { c.swordOffsetY = (float) v; c.save(); }));
-        all.add(new SliderRow("Смещение по Z", Category.MAIN, -0.40, 0.40, false, () -> c.swordOffsetZ, v -> { c.swordOffsetZ = (float) v; c.save(); }));
+        // === ОСНОВНОЕ (МЕЧ, РАКУРС, УДАР И ПРИЦЕЛ) ===
+        all.add(new HeaderLabelRow("Расположение меча и ракурс", Category.MAIN));
+        all.add(new ToggleRow("Изменять размер и ракурс меча", Category.MAIN, () -> c.smallSword, () -> { c.smallSword = !c.smallSword; c.save(); }, null));
+        all.add(new ToggleRow("Применять только к оружию", Category.MAIN, () -> c.onlyWeapons, () -> { c.onlyWeapons = !c.onlyWeapons; c.save(); }, null));
+        all.add(new SliderRow("Размер меча (Scale)", Category.MAIN, 0.25, 1.30, false, () -> c.swordScale, v -> { c.swordScale = (float) v; c.save(); }));
+        all.add(new SliderRow("Позиция X (влево / вправо)", Category.MAIN, -0.50, 0.50, false, () -> c.swordOffsetX, v -> { c.swordOffsetX = (float) v; c.save(); }));
+        all.add(new SliderRow("Позиция Y (вниз / вверх)", Category.MAIN, -0.50, 0.50, false, () -> c.swordOffsetY, v -> { c.swordOffsetY = (float) v; c.save(); }));
+        all.add(new SliderRow("Позиция Z (дальше / ближе)", Category.MAIN, -0.50, 0.50, false, () -> c.swordOffsetZ, v -> { c.swordOffsetZ = (float) v; c.save(); }));
+        all.add(new SliderRow("Ракурс: наклон Pitch (X°)", Category.MAIN, -180, 180, true, () -> c.swordRotX, v -> { c.swordRotX = (float) v; c.save(); }));
+        all.add(new SliderRow("Ракурс: поворот Yaw (Y°)", Category.MAIN, -180, 180, true, () -> c.swordRotY, v -> { c.swordRotY = (float) v; c.save(); }));
+        all.add(new SliderRow("Ракурс: крен Roll (Z°)", Category.MAIN, -180, 180, true, () -> c.swordRotZ, v -> { c.swordRotZ = (float) v; c.save(); }));
+        all.add(new ActionRow("Анимация удара (стиль взмаха)", Category.MAIN, () -> swingStyleName(c.swingStyle), () -> {
+            c.swingStyle = (c.swingStyle + 1) % 6;
+            c.save();
+        }));
+        all.add(new SliderRow("Скорость анимации удара", Category.MAIN, 0.30, 2.50, false, () -> c.swingSpeed, v -> { c.swingSpeed = (float) v; c.save(); }));
+        all.add(new ActionRow("Сбросить ракурс и позицию меча", Category.MAIN, () -> "Сброс", () -> {
+            c.swordScale = 0.72f;
+            c.swordOffsetX = 0.04f;
+            c.swordOffsetY = -0.04f;
+            c.swordOffsetZ = -0.06f;
+            c.swordRotX = 0f;
+            c.swordRotY = 0f;
+            c.swordRotZ = 0f;
+            c.swingStyle = 1;
+            c.swingSpeed = 1.0f;
+            c.save();
+            toast("Ракурс меча сброшен");
+        }));
+
+        all.add(new HeaderLabelRow("Кастомизация прицела (гладкий дизайн)", Category.MAIN));
+        all.add(new ToggleRow("Кастомный прицел (откл. стандартный)", Category.MAIN, () -> c.customCrosshair, () -> { c.customCrosshair = !c.customCrosshair; c.save(); }, null));
+        all.add(new ActionRow("Дизайн прицела (8 стилей)", Category.MAIN, () -> crosshairStyleName(c.crosshairStyle), () -> {
+            c.crosshairStyle = (c.crosshairStyle + 1) % 8;
+            c.save();
+        }));
+        all.add(new SliderRow("Размер прицела", Category.MAIN, 2, 16, true, () -> c.crosshairSize, v -> { c.crosshairSize = (int) v; c.save(); }));
+        all.add(new SliderRow("Зазор прицела (Gap)", Category.MAIN, 0, 12, true, () -> c.crosshairGap, v -> { c.crosshairGap = (int) v; c.save(); }));
+        all.add(new SliderRow("Толщина линий", Category.MAIN, 0.8, 3.5, false, () -> c.crosshairThickness, v -> { c.crosshairThickness = (float) v; c.save(); }));
+        all.add(new ToggleRow("Точка в центре прицела", Category.MAIN, () -> c.crosshairDot, () -> { c.crosshairDot = !c.crosshairDot; c.save(); }, null));
+        all.add(new ToggleRow("Тёмная обводка для чёткости", Category.MAIN, () -> c.crosshairOutline, () -> { c.crosshairOutline = !c.crosshairOutline; c.save(); }, null));
+        all.add(new ToggleRow("Динамика от движения и ударов", Category.MAIN, () -> c.crosshairDynamic, () -> { c.crosshairDynamic = !c.crosshairDynamic; c.save(); }, null));
+        all.add(new ToggleRow("Кольцо перезарядки удара", Category.MAIN, () -> c.crosshairCooldownRing, () -> { c.crosshairCooldownRing = !c.crosshairCooldownRing; c.save(); }, null));
+        all.add(new SwatchRow("Цвет прицела", Category.MAIN, ACCENT_PALETTE, () -> c.crosshairColor, v -> { c.crosshairColor = v; c.save(); }));
+
+        all.add(new HeaderLabelRow("Камера и руки", Category.MAIN));
         all.add(new ToggleRow("Свечение предметов в руках", Category.MAIN, () -> c.handGlow, () -> { c.handGlow = !c.handGlow; c.save(); }, null));
         all.add(new ToggleRow("No HurtCam (Без тряски урона)", Category.MAIN, () -> c.noHurtCam, () -> { c.noHurtCam = !c.noHurtCam; c.save(); }, null));
         all.add(new ToggleRow("Low Fire (Низкий огонь)", Category.MAIN, () -> c.lowFire, () -> { c.lowFire = !c.lowFire; c.save(); }, null));
         all.add(new ToggleRow("Мягкая виньетка экрана", Category.MAIN, () -> c.screenVignette, () -> { c.screenVignette = !c.screenVignette; c.save(); }, null));
         all.add(new ToggleRow("Убрать покачивание камеры", Category.MAIN, () -> c.renderTweaks, () -> { c.renderTweaks = !c.renderTweaks; c.save(); }, null));
-        all.add(new ToggleRow("Кастомный прицел", Category.MAIN, () -> c.customCrosshair, () -> { c.customCrosshair = !c.customCrosshair; c.save(); }, null));
-        all.add(new SwatchRow("Цвет прицела", Category.MAIN, ACCENT_PALETTE, () -> c.crosshairColor, v -> { c.crosshairColor = v; c.save(); }));
 
         // === ХЕЛПЕРЫ ===
         all.add(new HeaderLabelRow("Таймеры и границы PvP", Category.HELPERS));
-        all.add(new ToggleRow("Таймер эндер-жемчуга (время полёта)", Category.HELPERS, () -> c.pearlTimer, () -> { c.pearlTimer = !c.pearlTimer; c.save(); },
+        all.add(new ToggleRow("Таймер эндер-жемчуга (трекер полёта)", Category.HELPERS, () -> c.pearlTimer, () -> { c.pearlTimer = !c.pearlTimer; c.save(); },
                 () -> openSubDetails("Таймер эндер-жемчуга", List.of(
-                        new ToggleRow("Линия траектории полёта", Category.HELPERS, () -> c.pearlTrajectory, () -> { c.pearlTrajectory = !c.pearlTrajectory; c.save(); }, null),
+                        new ToggleRow("Окно секунд слева в HUD", Category.HELPERS, () -> c.showPearlHud, () -> { c.showPearlHud = !c.showPearlHud; c.save(); }, null),
+                        new ToggleRow("Линия траектории и луч падения", Category.HELPERS, () -> c.pearlTrajectory, () -> { c.pearlTrajectory = !c.pearlTrajectory; c.save(); }, null),
                         new SwatchRow("Цвет индикатора", Category.HELPERS, ACCENT_PALETTE, () -> c.pearlColor, col -> { c.pearlColor = col; c.save(); })
                 ))));
+        all.add(new ToggleRow("Окно секунд перла слева в HUD", Category.HELPERS, () -> c.showPearlHud, () -> { c.showPearlHud = !c.showPearlHud; c.save(); }, null));
         all.add(new ToggleRow("Границы Трапки / Пласта по блокам", Category.HELPERS, () -> c.trapPlastPreview, () -> { c.trapPlastPreview = !c.trapPlastPreview; c.save(); },
                 () -> openSubDetails("Границы Трапки / Пласта", List.of(
                         new ActionRow("Режим отображения", Category.HELPERS, () -> switch (c.trapPlastMode) {
@@ -272,6 +335,7 @@ public class ArtemScreen extends Screen {
         all.add(new ToggleRow("Режим перемещения HUD", Category.HUD, () -> c.hudEditMode, () -> { c.hudEditMode = !c.hudEditMode; c.save(); }, null));
         all.add(new SliderRow("Масштаб элементов HUD", Category.HUD, 0.50, 1.20, false, () -> c.hudScale, v -> { c.hudScale = (float) v; c.save(); }));
         all.add(new ToggleRow("Верхняя панель (Ник/FPS/Время)", Category.HUD, () -> c.showServer, () -> { c.showServer = !c.showServer; c.save(); }, null));
+        all.add(new ToggleRow("Окно секунд перла слева", Category.HUD, () -> c.showPearlHud, () -> { c.showPearlHud = !c.showPearlHud; c.save(); }, null));
         all.add(new ToggleRow("Мини-инвентарь (Inventory)", Category.HUD, () -> c.showInventory, () -> { c.showInventory = !c.showInventory; c.save(); }, null));
         all.add(new ToggleRow("Эффекты зелий (Potions)", Category.HUD, () -> c.showPotions, () -> { c.showPotions = !c.showPotions; c.save(); }, null));
         all.add(new ToggleRow("Кулдауны предметов (Cooldowns)", Category.HUD, () -> c.showCooldowns, () -> { c.showCooldowns = !c.showCooldowns; c.save(); }, null));
@@ -475,7 +539,7 @@ public class ArtemScreen extends Screen {
         if (r instanceof SwatchRow w) return w.category();
         if (r instanceof ActionRow a) return a.category();
         if (r instanceof KeybindRow k) return k.category();
-        return Category.HELPERS;
+        return Category.MAIN;
     }
 
     private int rowHeight(RowItem r) {
@@ -995,14 +1059,7 @@ public class ArtemScreen extends Screen {
     }
 
     @Override
-    public void close() {
-        ArtemConfig.get().save();
-        if (client != null) client.setScreen(parent);
-    }
-
-    @Override
     public boolean shouldPause() {
         return false;
     }
 }
-// === КОНЕЦ ФАЙЛА ===
