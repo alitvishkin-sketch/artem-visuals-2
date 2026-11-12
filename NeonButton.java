@@ -11,108 +11,129 @@ import java.util.function.BooleanSupplier;
 import java.util.function.Supplier;
 
 /**
- * Современная кнопка в стиле тёмного неона с плавным hover и индикатором ВКЛ/ВЫКЛ.
+ * Компактные кнопки, тумблеры и вкладки в стиле PulseVisuals / FunTime.
  */
 public class NeonButton extends ClickableWidget {
-    private final Supplier<String> label;
-    private final BooleanSupplier state; // null = обычная кнопка или переключатель значений
-    private final Runnable action;
-    private float hoverAnim = 0f;
+    public enum Style {
+        TOGGLE,
+        ACTION,
+        DOCK_TAB,
+        CLOSE_ICON
+    }
 
-    // Цвета темы
-    public static final int BG = 0xE6100D1D;
-    public static final int BG_HOVER = 0xF21B1533;
-    public static final int NEON = 0xFF9B59FF;
-    public static final int NEON_DIM = 0xFF473275;
-    public static final int NEON_ON = 0xFFC77DFF;
-    public static final int TEXT = 0xFFE6E0F8;
+    private final Supplier<String> label;
+    private final BooleanSupplier state;
+    private final Runnable action;
+    private final Style style;
+    private float hoverAnim = 0f;
+    private float toggleAnim = -1f;
+
+    public static final int BG = 0xE6151520;
+    public static final int BG_HOVER = 0xF21E1E2E;
+    public static final int NEON = 0xFF7B68EE;
+    public static final int NEON_DIM = 0xFF34324A;
+    public static final int TEXT = 0xFFD8D8E6;
+    public static final int TEXT_DIM = 0xFF7D7D92;
     public static final int TEXT_ON = 0xFFFFFFFF;
 
     public NeonButton(int x, int y, int w, int h, Supplier<String> label, BooleanSupplier state, Runnable action) {
+        this(x, y, w, h, label, state, action, state != null ? Style.TOGGLE : Style.ACTION);
+    }
+
+    public NeonButton(int x, int y, int w, int h, Supplier<String> label, BooleanSupplier state, Runnable action, Style style) {
         super(x, y, w, h, Text.empty());
         this.label = label;
         this.state = state;
         this.action = action;
+        this.style = style;
     }
 
     @Override
     protected void renderWidget(DrawContext ctx, int mouseX, int mouseY, float delta) {
-        boolean isToggle = state != null;
-        boolean on = isToggle && state.getAsBoolean();
         boolean hover = isHovered();
-
-        hoverAnim += ((hover ? 1f : 0f) - hoverAnim) * Math.min(1f, delta * 0.45f);
+        hoverAnim += ((hover ? 1f : 0f) - hoverAnim) * 0.25f;
 
         String rawText = label.get();
         setMessage(Text.literal(rawText));
+        TextRenderer tr = MinecraftClient.getInstance().textRenderer;
 
         int x = getX(), y = getY(), w = width, h = height;
 
-        // Фон со скруглёнными углами (срез 1px по углам)
-        int bgColor = on ? 0xEE181230 : (hover ? BG_HOVER : BG);
-        fillRounded(ctx, x, y, w, h, bgColor);
-
-        // Мягкий внутренний блик сверху
-        ctx.fill(x + 2, y + 1, x + w - 2, y + 2, on ? 0x33C77DFF : 0x18FFFFFF);
-
-        // Рамка
-        int border = on ? NEON_ON : (hover ? NEON : NEON_DIM);
-        drawRoundedBorder(ctx, x, y, w, h, border);
-
-        // Полоска подсветки при наведении
-        if (hoverAnim > 0.02f) {
-            int alpha = (int) (hoverAnim * 0x45);
-            int glow = (alpha << 24) | (NEON & 0x00FFFFFF);
-            ctx.fill(x + 1, y + 1, x + w - 1, y + h - 1, glow);
+        if (style == Style.CLOSE_ICON) {
+            int bg = hover ? 0x66FF4D6D : 0x22FFFFFF;
+            fillRounded(ctx, x, y, w, h, bg);
+            ctx.drawCenteredTextWithShadow(tr, "✕", x + w / 2, y + (h - 8) / 2, hover ? 0xFFFFFFFF : TEXT_DIM);
+            return;
         }
 
-        TextRenderer tr = MinecraftClient.getInstance().textRenderer;
-
-        if (isToggle) {
-            // Убираем дублирующий хвост ": ВКЛ" / ": ВЫКЛ", если он передан в строке
-            String cleanName = rawText
-                    .replace(": ВКЛ", "")
-                    .replace(": ВЫКЛ", "");
-
-            // Левая цветная риска
-            int accent = on ? 0xFF38F2AF : 0xFF5A4E7A;
-            ctx.fill(x + 1, y + 3, x + 3, y + h - 3, accent);
-
-            // Название слева
-            ctx.drawText(tr, cleanName, x + 7, y + (h - 8) / 2, on ? TEXT_ON : TEXT, true);
-
-            // Плашка-индикатор справа
-            int pillW = 28;
-            int pillH = h - 6;
-            int px = x + w - pillW - 4;
-            int py = y + 3;
-            int pillBg = on ? 0x3338F2AF : 0x28FFFFFF;
-            int pillBorder = on ? 0xAA38F2AF : 0x448880A8;
-
-            ctx.fill(px, py, px + pillW, py + pillH, pillBg);
-            ctx.fill(px, py, px + pillW, py + 1, pillBorder);
-            ctx.fill(px, py + pillH - 1, px + pillW, py + pillH, pillBorder);
-
-            String badge = on ? "ВКЛ" : "ВЫКЛ";
-            int badgeColor = on ? 0xFF4CFFBE : 0xFF968EB0;
-            int bw = tr.getWidth(badge);
-            ctx.drawText(tr, badge, px + (pillW - bw) / 2, py + (pillH - 8) / 2 + 1, badgeColor, false);
-        } else {
-            // Обычная кнопка / вкладка / переключатель значений
-            if (hover) {
-                ctx.fill(x + 6, y + h - 2, x + w - 6, y + h - 1, NEON_ON);
+        if (style == Style.DOCK_TAB) {
+            boolean active = state != null && state.getAsBoolean();
+            int bg = active ? 0xFF6C5CE7 : (hover ? 0x33FFFFFF : 0x18FFFFFF);
+            fillRounded(ctx, x, y, w, h, bg);
+            if (active) {
+                ctx.fill(x + 2, y, x + w - 2, y + 1, 0x88B8A9FF);
             }
-            ctx.drawCenteredTextWithShadow(tr, rawText, x + w / 2, y + (h - 8) / 2, hover ? TEXT_ON : TEXT);
+            ctx.drawCenteredTextWithShadow(tr, rawText, x + w / 2, y + (h - 8) / 2, active ? TEXT_ON : (hover ? TEXT : TEXT_DIM));
+            return;
+        }
+
+        int bgColor = hover ? BG_HOVER : BG;
+        fillRounded(ctx, x, y, w, h, bgColor);
+
+        int borderColor = hover ? 0x448B78FF : 0x1AFFFFFF;
+        drawRoundedBorder(ctx, x, y, w, h, borderColor);
+
+        if (style == Style.TOGGLE && state != null) {
+            boolean on = state.getAsBoolean();
+            if (toggleAnim < 0f) toggleAnim = on ? 1f : 0f;
+            toggleAnim += ((on ? 1f : 0f) - toggleAnim) * 0.3f;
+
+            String cleanName = rawText.replace(": ВКЛ", "").replace(": ВЫКЛ", "");
+            int labelCol = on ? TEXT_ON : (hover ? TEXT : 0xFFA2A2B8);
+            ctx.drawText(tr, cleanName, x + 6, y + (h - 8) / 2, labelCol, false);
+
+            int tw = 22;
+            int th = 10;
+            int tx = x + w - tw - 5;
+            int ty = y + (h - th) / 2;
+
+            int trackBg = on ? 0xFF6C5CE7 : 0xFF282838;
+            fillRounded(ctx, tx, ty, tw, th, trackBg);
+            if (on) {
+                ctx.fill(tx + 1, ty - 1, tx + tw - 1, ty, 0x337B68EE);
+                ctx.fill(tx + 1, ty + th, tx + tw - 1, ty + th + 1, 0x337B68EE);
+            }
+
+            int knobSize = 6;
+            int travel = tw - knobSize - 4;
+            int kx = tx + 2 + Math.round(travel * toggleAnim);
+            int ky = ty + 2;
+            ctx.fill(kx, ky, kx + knobSize, ky + knobSize, on ? 0xFFFFFFFF : 0xFF8A8AA0);
+        } else {
+            int colonIdx = rawText.indexOf(':');
+            if (colonIdx > 0 && colonIdx < rawText.length() - 1) {
+                String k = rawText.substring(0, colonIdx + 1);
+                String v = rawText.substring(colonIdx + 1).trim();
+                ctx.drawText(tr, k, x + 6, y + (h - 8) / 2, 0xFFA2A2B8, false);
+                int vw = tr.getWidth(v);
+                ctx.drawText(tr, v, x + w - vw - 6, y + (h - 8) / 2, 0xFF9D8DF7, false);
+            } else {
+                ctx.drawCenteredTextWithShadow(tr, rawText, x + w / 2, y + (h - 8) / 2, hover ? TEXT_ON : TEXT);
+            }
         }
     }
 
-    private static void fillRounded(DrawContext ctx, int x, int y, int w, int h, int color) {
+    public static void fillRounded(DrawContext ctx, int x, int y, int w, int h, int color) {
+        if (w <= 2 || h <= 2) {
+            ctx.fill(x, y, x + w, y + h, color);
+            return;
+        }
         ctx.fill(x + 1, y, x + w - 1, y + h, color);
         ctx.fill(x, y + 1, x + 1, y + h - 1, color);
         ctx.fill(x + w - 1, y + 1, x + w, y + h - 1, color);
     }
 
-    private static void drawRoundedBorder(DrawContext ctx, int x, int y, int w, int h, int color) {
+    public static void drawRoundedBorder(DrawContext ctx, int x, int y, int w, int h, int color) {
         ctx.fill(x + 1, y, x + w - 1, y + 1, color);
         ctx.fill(x + 1, y + h - 1, x + w - 1, y + h, color);
         ctx.fill(x, y + 1, x + 1, y + h - 1, color);
