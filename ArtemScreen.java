@@ -11,6 +11,7 @@ import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.gui.widget.TextFieldWidget;
 import net.minecraft.text.Text;
+import org.lwjgl.glfw.GLFW;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -20,26 +21,31 @@ import java.util.function.Consumer;
 import java.util.function.Supplier;
 
 /**
- * Меню ArtemVisuals в стиле PulseVisuals: поиск, тумблеры, слайдеры по ПКМ и док с иконками.
+ * Премиум-меню ArtemVisuals в стиле PulseVisuals с живым поиском, скруглённым стеклом, слайдерами и доком.
  */
 public class ArtemScreen extends Screen {
-    private static final int W = 316;
-    private static final int H = 174;
-    private static final String[] TABS = {"Эффекты", "HUD", "Прицел", "Оптим.", "Профили"};
+    private static final int W = 336;
+    private static final int H = 192;
+    private static final String[] TABS = {"Эффекты", "HUD", "Прицел", "FunTime", "Профили"};
     private static final String[] LEVELS = {"Низкое", "Среднее", "Высокое"};
     private static final String[] STYLES = {"Крест", "Точка", "Круг", "Плюс"};
+    private static final int[] OVERLAY_PALETTE = {0xFFFFD166, 0xFF7B68EE, 0xFF00F5FF, 0xFFFF4D6D, 0xFFFFFFFF};
+    private static final int[] CROSSHAIR_PALETTE = {0xFF00F5FF, 0xFF9B59FF, 0xFFFF2D95, 0xFF39FF14, 0xFFFFFFFF};
 
     private final Screen parent;
     private int tab = 0;
     private int left, top;
-    private TextFieldWidget searchField;
+
+    // Собственный быстрый поиск без потери фокуса
     private String searchQuery = "";
+    private boolean searchFocused = false;
+
     private TextFieldWidget profileNameField;
     private String statusMessage = "";
     private long statusUntil = 0;
     private long openedAtMs = 0;
 
-    // Всплывающее окно поднастроек по ПКМ (как на первом скриншоте PulseVisuals)
+    // Всплывающее окно тонкой настройки по ПКМ
     private String popupModule = null;
 
     public ArtemScreen(Screen parent) {
@@ -47,7 +53,7 @@ public class ArtemScreen extends Screen {
         this.parent = parent;
     }
 
-    private record ModuleEntry(String name, BooleanSupplier get, Consumer<Boolean> set, String popupKey) {}
+    private record ModuleEntry(String name, String keywords, BooleanSupplier get, Consumer<Boolean> set, String popupKey) {}
 
     @Override
     protected void init() {
@@ -56,33 +62,25 @@ public class ArtemScreen extends Screen {
         }
         left = (width - W) / 2;
         top = (height - H) / 2 - 4;
+        rebuildContent();
+    }
+
+    private void rebuildContent() {
         clearChildren();
+        profileNameField = null;
 
         ArtemConfig c = ArtemConfig.get();
         MinecraftClient mc = MinecraftClient.getInstance();
 
-        // Поле поиска в правом верхнем углу окна (как на скриншоте PulseVisuals)
-        searchField = new TextFieldWidget(textRenderer, left + W - 98, top + 5, 74, 13, Text.literal("Поиск"));
-        searchField.setMaxLength(24);
-        searchField.setDrawsBackground(false);
-        searchField.setPlaceholder(Text.literal("Поиск..."));
-        searchField.setText(searchQuery);
-        searchField.setChangedListener(txt -> {
-            searchQuery = txt;
-            popupModule = null;
-            clearAndInit();
-        });
-        addDrawableChild(searchField);
-
         // Кнопка закрытия ✕
-        addDrawableChild(new NeonButton(left + W - 19, top + 5, 13, 13,
+        addDrawableChild(new NeonButton(left + W - 21, top + 6, 14, 14,
                 () -> "✕", null, this::close, NeonButton.Style.CLOSE_ICON));
 
-        int y = top + 25;
-        int cw = (W - 22) / 2;
-        int x0 = left + 8;
+        int y = top + 28;
+        int cw = (W - 24) / 2;
+        int x0 = left + 9;
         int x1 = x0 + cw + 6;
-        int step = 20;
+        int step = 23;
 
         if (!searchQuery.isBlank()) {
             buildSearchResults(c, mc, x0, x1, y, cw, step);
@@ -96,33 +94,33 @@ public class ArtemScreen extends Screen {
             }
         }
 
-        // Окно поднастроек (если открыто по ПКМ)
         if (popupModule != null) {
             buildPopupControls(c, mc);
         }
 
-        // Нижний плавающий док с графическими иконками (как на скриншоте)
-        int dockW = 148;
+        // Плавающий стеклянный док снизу
+        int dockW = 172;
         int dockLeft = (width - dockW) / 2;
-        int dockTop = top + H + 7;
-        int iconW = 22;
-        int gap = 6;
+        int dockTop = top + H + 8;
+        int iconW = 24;
+        int gap = 7;
         int startDockX = dockLeft + (dockW - (iconW * 5 + gap * 4)) / 2;
 
         for (int i = 0; i < 5; i++) {
             final int idx = i;
             addDrawableChild(new NeonButton(
                     startDockX + i * (iconW + gap),
-                    dockTop + 3,
+                    dockTop + 4,
                     iconW,
-                    16,
+                    18,
                     () -> TABS[idx],
                     () -> tab == idx && searchQuery.isBlank(),
                     () -> {
                         tab = idx;
                         searchQuery = "";
+                        searchFocused = false;
                         popupModule = null;
-                        clearAndInit();
+                        rebuildContent();
                     },
                     NeonButton.Style.DOCK_ICON,
                     i
@@ -132,26 +130,28 @@ public class ArtemScreen extends Screen {
 
     private List<ModuleEntry> allModules(ArtemConfig c, MinecraftClient mc) {
         List<ModuleEntry> list = new ArrayList<>();
-        list.add(new ModuleEntry("Jump Circle", () -> EffectManager.jumpCircle, v -> EffectManager.jumpCircle = v, "jump_circle"));
-        list.add(new ModuleEntry("Block Overlay", () -> EffectManager.blockOverlay, v -> EffectManager.blockOverlay = v, "block_overlay"));
-        list.add(new ModuleEntry("Все эффекты", () -> c.masterEnabled, v -> c.masterEnabled = v, "particles"));
-        list.add(new ModuleEntry("Листопад", () -> c.leafParticles, v -> c.leafParticles = v, "particles"));
-        list.add(new ModuleEntry("Дождь / снег", () -> c.precipitationEffects, v -> c.precipitationEffects = v, null));
-        list.add(new ModuleEntry("Блики на воде", () -> c.waterSparkles, v -> c.waterSparkles = v, null));
-        list.add(new ModuleEntry("Светлячки", () -> c.fireflies, v -> c.fireflies = v, null));
-        list.add(new ModuleEntry("Мягкий свет", () -> c.softLighting, v -> {
+        list.add(new ModuleEntry("Jump Circle", "jump circle круг прыжок", () -> EffectManager.jumpCircle, v -> EffectManager.jumpCircle = v, "jump_circle"));
+        list.add(new ModuleEntry("Block Overlay", "block overlay обводка блок", () -> EffectManager.blockOverlay, v -> EffectManager.blockOverlay = v, "block_overlay"));
+        list.add(new ModuleEntry("Все эффекты", "все эффекты particles частицы", () -> c.masterEnabled, v -> c.masterEnabled = v, "particles"));
+        list.add(new ModuleEntry("Листопад", "листопад leaves", () -> c.leafParticles, v -> c.leafParticles = v, "particles"));
+        list.add(new ModuleEntry("Дождь / снег", "дождь снег weather", () -> c.precipitationEffects, v -> c.precipitationEffects = v, null));
+        list.add(new ModuleEntry("Блики на воде", "блики вода water", () -> c.waterSparkles, v -> c.waterSparkles = v, null));
+        list.add(new ModuleEntry("Светлячки", "светлячки fireflies", () -> c.fireflies, v -> c.fireflies = v, null));
+        list.add(new ModuleEntry("Ломание блоков", "ломание блоков break", () -> c.blockBreakEffects, v -> c.blockBreakEffects = v, null));
+        list.add(new ModuleEntry("Мягкий свет", "мягкий свет fullbright гамма", () -> c.softLighting, v -> {
             c.softLighting = v;
             Optimizer.applyLighting(mc);
         }, null));
-        list.add(new ModuleEntry("Счётчик FPS", () -> c.showFps, v -> c.showFps = v, null));
-        list.add(new ModuleEntry("Пинг (Ping)", () -> c.showPing, v -> c.showPing = v, null));
-        list.add(new ModuleEntry("Координаты", () -> c.showXyz, v -> c.showXyz = v, null));
-        list.add(new ModuleEntry("Клики (CPS)", () -> c.showCps, v -> c.showCps = v, null));
-        list.add(new ModuleEntry("Клавиши WASD", () -> c.showWasd, v -> c.showWasd = v, null));
-        list.add(new ModuleEntry("Инфо-бар (Верх)", () -> c.showServer, v -> c.showServer = v, null));
-        list.add(new ModuleEntry("Potions HUD", () -> HudManager.showPotions, v -> HudManager.showPotions = v, null));
-        list.add(new ModuleEntry("TargetHUD", () -> HudManager.showTargetHud, v -> HudManager.showTargetHud = v, null));
-        list.add(new ModuleEntry("Свой прицел", () -> c.customCrosshair, v -> c.customCrosshair = v, "crosshair"));
+        list.add(new ModuleEntry("Адаптивно к FPS", "адаптивно fps фпс", () -> c.adaptive, v -> c.adaptive = v, null));
+        list.add(new ModuleEntry("Инфо-бар (Верх)", "инфо бар сервер funtime topbar", () -> c.showServer, v -> c.showServer = v, null));
+        list.add(new ModuleEntry("TargetHUD", "target hud таргет цель хп", () -> HudManager.showTargetHud, v -> HudManager.showTargetHud = v, null));
+        list.add(new ModuleEntry("Potions HUD", "potions зелья эффекты", () -> HudManager.showPotions, v -> HudManager.showPotions = v, null));
+        list.add(new ModuleEntry("Клавиши WASD", "wasd keystrokes клавиши", () -> c.showWasd, v -> c.showWasd = v, null));
+        list.add(new ModuleEntry("Счётчик FPS", "fps фпс", () -> c.showFps, v -> c.showFps = v, null));
+        list.add(new ModuleEntry("Пинг (Ping)", "ping пинг", () -> c.showPing, v -> c.showPing = v, null));
+        list.add(new ModuleEntry("Координаты", "xyz координаты", () -> c.showXyz, v -> c.showXyz = v, null));
+        list.add(new ModuleEntry("Клики (CPS)", "cps кпс клики", () -> c.showCps, v -> c.showCps = v, null));
+        list.add(new ModuleEntry("Свой прицел", "прицел crosshair", () -> c.customCrosshair, v -> c.customCrosshair = v, null));
         return list;
     }
 
@@ -159,7 +159,7 @@ public class ArtemScreen extends Screen {
         String q = searchQuery.toLowerCase(Locale.ROOT).trim();
         int idx = 0;
         for (ModuleEntry m : allModules(c, mc)) {
-            if (!m.name().toLowerCase(Locale.ROOT).contains(q)) continue;
+            if (!m.name().toLowerCase(Locale.ROOT).contains(q) && !m.keywords().contains(q)) continue;
             if (idx >= 12) break;
             int colX = (idx % 2 == 0) ? x0 : x1;
             int rowY = y + (idx / 2) * step;
@@ -188,7 +188,7 @@ public class ArtemScreen extends Screen {
 
     private void buildHud(ArtemConfig c, int x0, int x1, int y, int cw, int step) {
         toggle(x0, y, cw, "Инфо-бар (Верх)", () -> c.showServer, v -> c.showServer = v, null);
-        toggle(x1, y, cw, "TargetHUD (Цель)", () -> HudManager.showTargetHud, v -> HudManager.showTargetHud = v, null);
+        toggle(x1, y, cw, "TargetHUD", () -> HudManager.showTargetHud, v -> HudManager.showTargetHud = v, null);
         toggle(x0, y + step, cw, "Potions HUD", () -> HudManager.showPotions, v -> HudManager.showPotions = v, null);
         toggle(x1, y + step, cw, "Клавиши WASD", () -> c.showWasd, v -> c.showWasd = v, null);
         toggle(x0, y + step * 2, cw, "Счётчик FPS", () -> c.showFps, v -> c.showFps = v, null);
@@ -203,29 +203,30 @@ public class ArtemScreen extends Screen {
         toggle(x0, y, cw, "Свой прицел", () -> c.customCrosshair, v -> c.customCrosshair = v, null);
         cycle(x1, y, cw, () -> "Стиль: " + STYLES[Math.min(c.crosshairStyle, 3)], () -> c.crosshairStyle = (c.crosshairStyle + 1) % 4);
 
-        // Настоящие плавные слайдеры
-        addDrawableChild(NeonButton.slider(x0, y + step, cw, 17, "Размер", 3, 12, true,
+        addDrawableChild(NeonButton.slider(x0, y + step, cw, 18, "Размер", 3, 12, true,
                 () -> c.crosshairSize, v -> { c.crosshairSize = (int) v; c.save(); }));
-        addDrawableChild(NeonButton.slider(x1, y + step, cw, 17, "Зазор", 0, 8, true,
+        addDrawableChild(NeonButton.slider(x1, y + step, cw, 18, "Зазор", 0, 8, true,
                 () -> c.crosshairGap, v -> { c.crosshairGap = (int) v; c.save(); }));
-        addDrawableChild(NeonButton.slider(x0, y + step * 2, cw, 17, "Толщина", 1, 3, true,
+        addDrawableChild(NeonButton.slider(x0, y + step * 2, cw, 18, "Толщина", 1, 3, true,
                 () -> c.crosshairThickness, v -> { c.crosshairThickness = (int) v; c.save(); }));
 
-        cycle(x1, y + step * 2, cw, () -> "Цвет: " + colorName(c.crosshairColor), () -> c.crosshairColor = nextColor(c.crosshairColor));
+        addDrawableChild(NeonButton.swatches(x1, y + step * 2 + 2, cw, 16, "Цвет", CROSSHAIR_PALETTE,
+                () -> c.crosshairColor, col -> { c.crosshairColor = col; c.save(); }));
+
         toggle(x0, y + step * 3, cw, "Обводка", () -> c.crosshairOutline, v -> c.crosshairOutline = v, null);
         toggle(x1, y + step * 3, cw, "Динамика", () -> c.crosshairDynamic, v -> c.crosshairDynamic = v, null);
     }
 
     private void buildOptimize(ArtemConfig c, MinecraftClient mc, int x0, int x1, int y, int cw, int step) {
-        addBtn(x0, y, cw * 2 + 6, 18, () -> "⚔ Пресет под FunTime PvP (HUD + 3D + FPS)", null, () -> {
+        addBtn(x0, y, cw * 2 + 6, 21, () -> "⚔ Активировать пресет FunTime PvP", null, () -> {
             applyFunTimePreset(c, mc);
             setStatus("Пресет FunTime PvP активирован");
         });
-        addBtn(x0, y + step + 2, cw * 2 + 6, 18, () -> "⚡ Применить пресет производительности", null, () -> {
+        addBtn(x0, y + step + 2, cw * 2 + 6, 21, () -> "⚡ Применить пресет высокого FPS", null, () -> {
             Optimizer.applyPerformancePreset(mc);
             setStatus("Пресет производительности применён");
         });
-        addBtn(x0, y + step * 2 + 4, cw * 2 + 6, 18,
+        addBtn(x0, y + step * 2 + 4, cw * 2 + 6, 21,
                 () -> Optimizer.hasBackup() ? "↺ Вернуть прежние настройки видео" : "Бэкап настроек отсутствует",
                 null, () -> {
                     if (Optimizer.hasBackup()) {
@@ -235,43 +236,42 @@ public class ArtemScreen extends Screen {
                         setStatus("Нечего восстанавливать");
                     }
                 });
-        addBtn(x0, y + step * 3 + 6, cw * 2 + 6, 18, () -> "Сбросить настройки мода", null, () -> {
+        addBtn(x0, y + step * 3 + 6, cw * 2 + 6, 21, () -> "Сбросить настройки мода", null, () -> {
             c.resetDefaults();
-            clearAndInit();
+            rebuildContent();
             setStatus("Сброшено к умолчаниям");
         });
     }
 
     private void buildPopupControls(ArtemConfig c, MinecraftClient mc) {
-        int pw = 128;
-        int ph = 84;
+        int pw = 142;
         int px = Math.max(6, left - pw - 8);
-        int py = top + 36;
+        int py = top + 34;
 
-        addDrawableChild(new NeonButton(px + pw - 16, py + 4, 12, 12,
-                () -> "✕", null, () -> { popupModule = null; clearAndInit(); }, NeonButton.Style.CLOSE_ICON));
+        addDrawableChild(new NeonButton(px + pw - 17, py + 5, 12, 12,
+                () -> "✕", null, () -> { popupModule = null; rebuildContent(); }, NeonButton.Style.CLOSE_ICON));
 
-        int ix = px + 7;
-        int iw = pw - 14;
-        int iy = py + 22;
+        int ix = px + 8;
+        int iw = pw - 16;
+        int iy = py + 24;
 
         switch (popupModule) {
             case "block_overlay" -> {
-                addDrawableChild(NeonButton.slider(ix, iy, iw, 17, "Яркость линий", 0.2, 1.0, false,
+                addDrawableChild(NeonButton.slider(ix, iy, iw, 19, "Яркость линий", 0.2, 1.0, false,
                         () -> EffectManager.blockOverlayAlpha, v -> EffectManager.blockOverlayAlpha = (float) v));
-                cycle(ix, iy + 22, iw, () -> "Цвет: " + overlayColorName(EffectManager.blockOverlayColor),
-                        () -> EffectManager.blockOverlayColor = nextOverlayColor(EffectManager.blockOverlayColor));
+                addDrawableChild(NeonButton.swatches(ix, iy + 26, iw, 16, "Цвет", OVERLAY_PALETTE,
+                        () -> EffectManager.blockOverlayColor, col -> EffectManager.blockOverlayColor = col));
             }
             case "jump_circle" -> {
-                addDrawableChild(NeonButton.slider(ix, iy, iw, 17, "Радиус круга", 0.6, 2.0, false,
+                addDrawableChild(NeonButton.slider(ix, iy, iw, 19, "Радиус круга", 0.6, 2.0, false,
                         () -> EffectManager.jumpCircleRadius, v -> EffectManager.jumpCircleRadius = (float) v));
-                cycle(ix, iy + 22, iw, () -> "Цвет: " + overlayColorName(EffectManager.jumpCircleColor),
-                        () -> EffectManager.jumpCircleColor = nextOverlayColor(EffectManager.jumpCircleColor));
+                addDrawableChild(NeonButton.swatches(ix, iy + 26, iw, 16, "Цвет", OVERLAY_PALETTE,
+                        () -> EffectManager.jumpCircleColor, col -> EffectManager.jumpCircleColor = col));
             }
             case "particles" -> {
-                addDrawableChild(NeonButton.slider(ix, iy, iw, 17, "Плотность", 0, 2, true,
+                addDrawableChild(NeonButton.slider(ix, iy, iw, 19, "Плотность", 0, 2, true,
                         () -> c.density, v -> { c.density = (int) v; c.save(); }));
-                addDrawableChild(NeonButton.slider(ix, iy + 22, iw, 17, "Радиус", 0, 2, true,
+                addDrawableChild(NeonButton.slider(ix, iy + 26, iw, 19, "Радиус", 0, 2, true,
                         () -> c.radius, v -> { c.radius = (int) v; c.save(); }));
             }
         }
@@ -289,7 +289,7 @@ public class ArtemScreen extends Screen {
 
         EffectManager.jumpCircle = true;
         EffectManager.blockOverlay = true;
-        EffectManager.blockOverlayColor = 0xFFFFD166; // Золотой как на скриншоте FunTime
+        EffectManager.blockOverlayColor = 0xFFFFD166;
         EffectManager.jumpCircleColor = 0xFFFFD166;
 
         c.customCrosshair = true;
@@ -308,40 +308,40 @@ public class ArtemScreen extends Screen {
     }
 
     private void buildProfiles(int x0, int y, int cw) {
-        profileNameField = new TextFieldWidget(textRenderer, x0, y, cw * 2 + 6, 15, Text.literal("Имя профиля"));
+        profileNameField = new TextFieldWidget(textRenderer, x0, y, cw * 2 + 6, 17, Text.literal("Имя профиля"));
         profileNameField.setMaxLength(28);
         profileNameField.setPlaceholder(Text.literal("Название профиля (напр. FunTime)..."));
         addDrawableChild(profileNameField);
 
-        addBtn(x0, y + 19, cw, 16, () -> "Сохранить", null, () -> {
+        addBtn(x0, y + 22, cw, 19, () -> "Сохранить", null, () -> {
             String name = profileNameField.getText();
             if (ProfileManager.saveProfile(name)) {
                 setStatus("Сохранено: " + name);
-                clearAndInit();
+                rebuildContent();
             } else {
                 setStatus("Введите имя");
             }
         });
-        addBtn(x0 + cw + 6, y + 19, cw, 16, () -> "Обновить", null, this::clearAndInit);
+        addBtn(x0 + cw + 6, y + 22, cw, 19, () -> "Обновить", null, this::rebuildContent);
 
         List<String> profiles = ProfileManager.listProfiles();
-        int py = y + 39;
+        int py = y + 46;
         int i = 0;
         for (String name : profiles) {
-            if (i >= 5) break;
+            if (i >= 4) break;
             final String n = name;
-            addBtn(x0, py, cw * 2 - 36, 16, () -> "▶ " + n, null, () -> {
+            addBtn(x0, py, cw * 2 - 40, 19, () -> "▶ " + n, null, () -> {
                 if (ProfileManager.loadProfile(n)) {
                     setStatus("Загружен: " + n);
-                    clearAndInit();
+                    rebuildContent();
                 }
             });
-            addBtn(x0 + cw * 2 - 32, py, 38, 16, () -> "Удал.", null, () -> {
+            addBtn(x0 + cw * 2 - 36, py, 42, 19, () -> "Удал.", null, () -> {
                 ProfileManager.deleteProfile(n);
                 setStatus("Удалён: " + n);
-                clearAndInit();
+                rebuildContent();
             });
-            py += 18;
+            py += 22;
             i++;
         }
     }
@@ -353,21 +353,21 @@ public class ArtemScreen extends Screen {
     }
 
     private void toggle(int x, int y, int w, String name, BooleanSupplier get, Consumer<Boolean> set, String popupKey) {
-        NeonButton btn = new NeonButton(x, y, w, 17, () -> name, get, () -> {
+        NeonButton btn = new NeonButton(x, y, w, 20, () -> name, get, () -> {
             set.accept(!get.getAsBoolean());
             ArtemConfig.get().save();
         });
         if (popupKey != null) {
             btn.withRightClick(() -> {
                 popupModule = popupKey.equals(popupModule) ? null : popupKey;
-                clearAndInit();
+                rebuildContent();
             });
         }
         addDrawableChild(btn);
     }
 
     private void cycle(int x, int y, int w, Supplier<String> label, Runnable change) {
-        addBtn(x, y, w, 17, label, null, () -> {
+        addBtn(x, y, w, 20, label, null, () -> {
             change.run();
             ArtemConfig.get().save();
         });
@@ -378,48 +378,88 @@ public class ArtemScreen extends Screen {
         statusUntil = System.currentTimeMillis() + 2200;
     }
 
-    private static String colorName(int argb) {
-        return switch (argb) {
-            case 0xFF9B59FF -> "Фиолетовый";
-            case 0xFF00F5FF -> "Циан";
-            case 0xFFFF2D95 -> "Розовый";
-            case 0xFF39FF14 -> "Зелёный";
-            case 0xFFFFFFFF -> "Белый";
-            default -> "Кастом";
-        };
-    }
-
-    private static int nextColor(int current) {
-        int[] palette = {0xFF9B59FF, 0xFF00F5FF, 0xFFFF2D95, 0xFF39FF14, 0xFFFFFFFF};
-        for (int i = 0; i < palette.length; i++) {
-            if (palette[i] == current) return palette[(i + 1) % palette.length];
-        }
-        return palette[0];
-    }
-
-    private static String overlayColorName(int argb) {
-        return switch (argb) {
-            case 0xFFFFD166 -> "Золотой";
-            case 0xFF7B68EE -> "Фиолетовый";
-            case 0xFF00F5FF -> "Циан";
-            case 0xFFFF4D6D -> "Розовый";
-            default -> "Белый";
-        };
-    }
-
-    private static int nextOverlayColor(int current) {
-        int[] palette = {0xFFFFD166, 0xFF7B68EE, 0xFF00F5FF, 0xFFFF4D6D, 0xFFFFFFFF};
-        for (int i = 0; i < palette.length; i++) {
-            if (palette[i] == current) return palette[(i + 1) % palette.length];
-        }
-        return palette[0];
-    }
-
     private float getOpenProgress() {
         long elapsed = System.currentTimeMillis() - openedAtMs;
         float t = Math.min(1f, Math.max(0f, elapsed / 180f));
         float inv = 1f - t;
         return 1f - inv * inv * inv;
+    }
+
+    // ——— Интерактивный поиск и ввод ———
+
+    private int searchBoxX() { return left + W - 118; }
+    private int searchBoxY() { return top + 6; }
+    private int searchBoxW() { return 93; }
+    private int searchBoxH() { return 14; }
+
+    @Override
+    public boolean mouseClicked(double mouseX, double mouseY, int button) {
+        int sx = searchBoxX(), sy = searchBoxY(), sw = searchBoxW(), sh = searchBoxH();
+        if (mouseX >= sx && mouseX <= sx + sw && mouseY >= sy && mouseY <= sy + sh) {
+            if (profileNameField != null) {
+                profileNameField.setFocused(false);
+            }
+            if (!searchQuery.isEmpty() && mouseX >= sx + sw - 13) {
+                searchQuery = "";
+                searchFocused = true;
+                popupModule = null;
+                rebuildContent();
+                return true;
+            }
+            searchFocused = true;
+            return true;
+        }
+        searchFocused = false;
+        return super.mouseClicked(mouseX, mouseY, button);
+    }
+
+    @Override
+    public boolean charTyped(char chr, int modifiers) {
+        if (profileNameField != null && profileNameField.isFocused()) {
+            return super.charTyped(chr, modifiers);
+        }
+        if (chr >= 32 && chr != 127) {
+            if (searchQuery.length() < 20) {
+                searchFocused = true;
+                searchQuery += chr;
+                popupModule = null;
+                rebuildContent();
+            }
+            return true;
+        }
+        return super.charTyped(chr, modifiers);
+    }
+
+    @Override
+    public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+        if (profileNameField != null && profileNameField.isFocused()) {
+            return super.keyPressed(keyCode, scanCode, modifiers);
+        }
+        if (keyCode == GLFW.GLFW_KEY_F && (modifiers & GLFW.GLFW_MOD_CONTROL) != 0) {
+            searchFocused = true;
+            return true;
+        }
+        if (keyCode == GLFW.GLFW_KEY_BACKSPACE && !searchQuery.isEmpty()) {
+            searchFocused = true;
+            searchQuery = searchQuery.substring(0, searchQuery.length() - 1);
+            popupModule = null;
+            rebuildContent();
+            return true;
+        }
+        if (keyCode == GLFW.GLFW_KEY_ESCAPE) {
+            if (!searchQuery.isEmpty()) {
+                searchQuery = "";
+                searchFocused = false;
+                rebuildContent();
+                return true;
+            }
+            if (popupModule != null) {
+                popupModule = null;
+                rebuildContent();
+                return true;
+            }
+        }
+        return super.keyPressed(keyCode, scanCode, modifiers);
     }
 
     @Override
@@ -428,42 +468,40 @@ public class ArtemScreen extends Screen {
         int dimAlpha = (int) (0x78 * p);
         ctx.fill(0, 0, width, height, dimAlpha << 24);
 
-        // Тень и главное окно
-        NeonButton.fillRounded(ctx, left - 3, top - 2, W + 6, H + 5, 0x55000000);
-        NeonButton.fillRounded(ctx, left, top, W, H, 0xEE0D0D15);
-        NeonButton.drawRoundedBorder(ctx, left, top, W, H, 0x24FFFFFF);
+        // Мягкое внешнее свечение и тень под главным окном
+        NeonButton.drawAmbientGlow(ctx, left, top, W, H, 8, 0xFF6C5CE7, 2);
+        NeonButton.fillGradientRounded(ctx, left, top, W, H, 8, 0xF210101A, 0xF20A0A12);
+        NeonButton.drawSmoothRoundedOutline(ctx, left, top, W, H, 8, 0x2EFFFFFF);
 
-        // Фон поля поиска в правом верхнем углу
-        NeonButton.fillRounded(ctx, left + W - 102, top + 4, 80, 14, 0xCC161622);
-        NeonButton.drawRoundedBorder(ctx, left + W - 102, top + 4, 80, 14, 0x1AFFFFFF);
+        // Тонкий стеклянный разделитель шапки
+        ctx.fill(left + 9, top + 23, left + W - 9, top + 24, 0x16FFFFFF);
 
-        ctx.fill(left + 8, top + 20, left + W - 8, top + 21, 0x14FFFFFF);
-
-        // Всплывающая карточка поднастроек (если открыта по ПКМ)
+        // Всплывающая карточка поднастроек по ПКМ
         if (popupModule != null) {
-            int pw = 128;
-            int ph = 84;
+            int pw = 142;
+            int ph = 82;
             int px = Math.max(6, left - pw - 8);
-            int py = top + 36;
-            NeonButton.fillRounded(ctx, px - 2, py - 2, pw + 4, ph + 4, 0x44000000);
-            NeonButton.fillRounded(ctx, px, py, pw, ph, 0xEE0D0D15);
-            NeonButton.drawRoundedBorder(ctx, px, py, pw, ph, 0x337B68EE);
-            ctx.fill(px + 6, py + 17, px + pw - 6, py + 18, 0x14FFFFFF);
+            int py = top + 34;
+            NeonButton.drawAmbientGlow(ctx, px, py, pw, ph, 7, 0xFF6C5CE7, 2);
+            NeonButton.fillGradientRounded(ctx, px, py, pw, ph, 7, 0xF212121E, 0xF20B0B14);
+            NeonButton.drawSmoothRoundedOutline(ctx, px, py, pw, ph, 7, 0x447B68EE);
+            ctx.fill(px + 8, py + 19, px + pw - 8, py + 20, 0x16FFFFFF);
         }
 
         // Плавающий док снизу
-        int dockW = 148;
+        int dockW = 172;
         int dockLeft = (width - dockW) / 2;
-        int dockTop = top + H + 7;
-        NeonButton.fillRounded(ctx, dockLeft, dockTop, dockW, 22, 0xEE0D0D15);
-        NeonButton.drawRoundedBorder(ctx, dockLeft, dockTop, dockW, 22, 0x24FFFFFF);
+        int dockTop = top + H + 8;
+        NeonButton.drawAmbientGlow(ctx, dockLeft, dockTop, dockW, 26, 8, 0xFF6C5CE7, 1);
+        NeonButton.fillGradientRounded(ctx, dockLeft, dockTop, dockW, 26, 8, 0xF211111C, 0xF20A0A12);
+        NeonButton.drawSmoothRoundedOutline(ctx, dockLeft, dockTop, dockW, 26, 8, 0x2AFFFFFF);
     }
 
     @Override
     public void render(DrawContext ctx, int mouseX, int mouseY, float delta) {
         float p = getOpenProgress();
-        float scale = 0.88f + 0.12f * p;
-        float slideY = (1f - p) * 14f;
+        float scale = 0.90f + 0.10f * p;
+        float slideY = (1f - p) * 12f;
 
         int cx = left + W / 2;
         int cy = top + H / 2;
@@ -476,81 +514,150 @@ public class ArtemScreen extends Screen {
         super.render(ctx, mouseX, mouseY, delta);
 
         drawBrandHeader(ctx);
+        drawSearchBar(ctx, mouseX, mouseY);
 
-        // Хлебные крошки: Visuals / Эффекты
-        int bx = left + 9;
-        int by = top + 7;
-        ctx.drawText(textRenderer, "Visuals", bx, by, 0xFFF2F2FA, false);
-        bx += textRenderer.getWidth("Visuals");
-        ctx.drawText(textRenderer, " / ", bx, by, 0xFF55556A, false);
-        bx += textRenderer.getWidth(" / ");
-        ctx.drawText(textRenderer, searchQuery.isBlank() ? TABS[tab] : "Поиск", bx, by, 0xFF8E8EA4, false);
+        // Хлебные крошки: Artem › Эффекты
+        int bx = left + 10;
+        int by = top + 9;
+        ctx.drawText(textRenderer, "Artem", bx, by, 0xFFF4F4FC, false);
+        bx += textRenderer.getWidth("Artem");
+        ctx.drawText(textRenderer, " › ", bx, by, 0xFF5A5A72, false);
+        bx += textRenderer.getWidth(" › ");
+        ctx.drawText(textRenderer, searchQuery.isBlank() ? TABS[tab] : "Поиск", bx, by, 0xFF9D8DF7, false);
 
-        // Заголовок окна поднастроек по ПКМ
+        // Заголовок карточки поднастроек по ПКМ
         if (popupModule != null) {
-            int pw = 128;
+            int pw = 142;
             int px = Math.max(6, left - pw - 8);
-            int py = top + 36;
+            int py = top + 34;
             String title = switch (popupModule) {
                 case "block_overlay" -> "Block Overlay";
                 case "jump_circle" -> "Jump Circle";
-                default -> "Частицы";
+                default -> "Частицы мира";
             };
-            ctx.drawText(textRenderer, title, px + 7, py + 6, 0xFFE6E6F2, false);
+            ctx.drawText(textRenderer, title, px + 8, py + 7, 0xFFEAEAF6, false);
         }
 
-        // Предпросмотр прицела внизу вкладки Прицел
+        // Предпросмотр прицела во вкладке Прицел
         if (tab == 2 && searchQuery.isBlank()) {
             int px = left + W / 2;
-            int py = top + 132;
-            NeonButton.fillRounded(ctx, px - 22, py - 22, 44, 44, 0xFF151520);
-            NeonButton.drawRoundedBorder(ctx, px - 22, py - 22, 44, 44, 0x26FFFFFF);
+            int py = top + 144;
+            NeonButton.fillSmoothRounded(ctx, px - 24, py - 24, 48, 48, 6, 0xFF141420);
+            NeonButton.drawSmoothRoundedOutline(ctx, px - 24, py - 24, 48, 48, 6, 0x28FFFFFF);
             CrosshairRenderer.renderPreview(ctx, px, py, ArtemConfig.get());
         }
 
+        // Если по поиску ничего не нашлось
+        if (!searchQuery.isBlank() && children().size() <= 6) {
+            ctx.drawCenteredTextWithShadow(textRenderer, "Ничего не найдено по запросу «" + searchQuery + "»",
+                    left + W / 2, top + 92, 0xFF6E6E88);
+        }
+
         if (tab == 0 && searchQuery.isBlank() && popupModule == null) {
-            ctx.drawCenteredTextWithShadow(textRenderer, "ПКМ по модулю — открыть его настройки",
-                    left + W / 2, top + H - 15, 0xFF585870);
+            ctx.drawCenteredTextWithShadow(textRenderer, "Нажми ПКМ по карточке с ⚙ для настройки цвета и радиуса",
+                    left + W / 2, top + H - 15, 0xFF5C5C74);
         }
 
         if (tab == 1 && searchQuery.isBlank() && ArtemConfig.get().hudEditMode) {
             ctx.drawCenteredTextWithShadow(textRenderer, "Перетаскивайте элементы HUD мышью прямо на экране",
-                    left + W / 2, top + 134, 0xFF9D8DF7);
+                    left + W / 2, top + 150, 0xFF9D8DF7);
         }
 
         if (System.currentTimeMillis() < statusUntil && !statusMessage.isEmpty()) {
-            ctx.drawCenteredTextWithShadow(textRenderer, statusMessage, left + W / 2, top + H - 15, 0xFF8B78FF);
+            ctx.drawCenteredTextWithShadow(textRenderer, statusMessage, left + W / 2, top + H - 15, 0xFF9D8DF7);
         }
 
         if (tab == 4 && searchQuery.isBlank() && ProfileManager.listProfiles().isEmpty()) {
-            ctx.drawCenteredTextWithShadow(textRenderer, "Нет сохранённых профилей", left + W / 2, top + 95, 0xFF6E6E85);
+            ctx.drawCenteredTextWithShadow(textRenderer, "Нет сохранённых профилей", left + W / 2, top + 104, 0xFF6E6E85);
         }
 
+        drawDockTooltip(ctx, mouseX, mouseY);
+
         ctx.getMatrices().pop();
+    }
+
+    private void drawSearchBar(DrawContext ctx, int mouseX, int mouseY) {
+        int sx = searchBoxX(), sy = searchBoxY(), sw = searchBoxW(), sh = searchBoxH();
+        boolean hover = mouseX >= sx && mouseX <= sx + sw && mouseY >= sy && mouseY <= sy + sh;
+
+        NeonButton.fillSmoothRounded(ctx, sx, sy, sw, sh, 4, (searchFocused || hover) ? 0xFF1A1A2A : 0xFF141420);
+        NeonButton.drawSmoothRoundedOutline(ctx, sx, sy, sw, sh, 4,
+                searchFocused ? 0xFF7B68EE : (hover ? 0x33FFFFFF : 0x1AFFFFFF));
+
+        // Иконка лупы слева
+        int lx = sx + 6;
+        int ly = sy + 6;
+        NeonButton.drawCircle(ctx, lx, ly, 2, 0xFF8E8EA8);
+        NeonButton.drawCircle(ctx, lx, ly, 1, 0xFF161624);
+        ctx.fill(lx + 2, ly + 2, lx + 4, ly + 4, 0xFF8E8EA8);
+
+        int textX = sx + 13;
+        int textY = sy + 3;
+        if (searchQuery.isEmpty() && !searchFocused) {
+            ctx.drawText(textRenderer, "Поиск...", textX, textY, 0xFF5E5E76, false);
+        } else {
+            String visible = textRenderer.trimToWidth(searchQuery, sw - 26);
+            ctx.drawText(textRenderer, visible, textX, textY, 0xFFF2F2FA, false);
+            if (searchFocused && (System.currentTimeMillis() / 500) % 2 == 0) {
+                int cx = textX + textRenderer.getWidth(visible);
+                ctx.fill(cx, textY, cx + 1, textY + 8, 0xFF9D8DF7);
+            }
+        }
+
+        if (!searchQuery.isEmpty()) {
+            ctx.drawText(textRenderer, "×", sx + sw - 10, textY, 0xFF8E8EA8, false);
+        }
+    }
+
+    private void drawDockTooltip(DrawContext ctx, int mouseX, int mouseY) {
+        int dockW = 172;
+        int dockLeft = (width - dockW) / 2;
+        int dockTop = top + H + 8;
+        int iconW = 24;
+        int gap = 7;
+        int startDockX = dockLeft + (dockW - (iconW * 5 + gap * 4)) / 2;
+
+        for (int i = 0; i < 5; i++) {
+            int ix = startDockX + i * (iconW + gap);
+            int iy = dockTop + 4;
+            if (mouseX >= ix && mouseX <= ix + iconW && mouseY >= iy && mouseY <= iy + 18) {
+                String tip = TABS[i];
+                int tw = textRenderer.getWidth(tip) + 10;
+                int tx = ix + iconW / 2 - tw / 2;
+                int ty = dockTop - 14;
+                NeonButton.fillSmoothRounded(ctx, tx, ty, tw, 12, 3, 0xF0161624);
+                NeonButton.drawSmoothRoundedOutline(ctx, tx, ty, tw, 12, 3, 0x447B68EE);
+                ctx.drawCenteredTextWithShadow(textRenderer, tip, ix + iconW / 2, ty + 2, 0xFFF2F2FA);
+                break;
+            }
+        }
     }
 
     private void drawBrandHeader(DrawContext ctx) {
         String brand = "ArtemVisuals";
         String tag = "FunTime";
         int textW = textRenderer.getWidth(brand);
-        int tagW = textRenderer.getWidth(tag) + 6;
-        int iconW = 16;
+        int tagW = textRenderer.getWidth(tag) + 8;
+        int iconW = 18;
         int totalW = iconW + 4 + textW + 6 + tagW;
         int startX = left + (W - totalW) / 2;
-        int y = top - 15;
+        int y = top - 17;
+
+        // Мягкое свечение за пульс-иконкой
+        NeonButton.drawCircle(ctx, startX + 6, y + 5, 6, 0x337B68EE);
 
         int waveCol = 0xFF7B68EE;
         ctx.fill(startX, y + 5, startX + 4, y + 6, waveCol);
         ctx.fill(startX + 4, y + 2, startX + 5, y + 6, waveCol);
-        ctx.fill(startX + 5, y + 1, startX + 6, y + 8, 0xFF9D8DF7);
-        ctx.fill(startX + 6, y + 3, startX + 7, y + 9, waveCol);
-        ctx.fill(startX + 7, y + 5, startX + 12, y + 6, waveCol);
+        ctx.fill(startX + 5, y + 0, startX + 6, y + 9, 0xFFB8A9FF);
+        ctx.fill(startX + 6, y + 3, startX + 7, y + 10, waveCol);
+        ctx.fill(startX + 7, y + 5, startX + 13, y + 6, waveCol);
 
-        ctx.drawText(textRenderer, brand, startX + iconW, y + 1, 0xFFF4F4FA, true);
+        ctx.drawText(textRenderer, brand, startX + iconW, y + 1, 0xFFF6F6FC, true);
 
         int bx = startX + iconW + textW + 5;
-        NeonButton.fillRounded(ctx, bx, y, tagW, 10, 0x446C5CE7);
-        ctx.drawText(textRenderer, tag, bx + 3, y + 1, 0xFFB8A9FF, false);
+        NeonButton.fillGradientRounded(ctx, bx, y, tagW, 11, 3, 0x886C5CE7, 0x664B3CA8);
+        ctx.drawText(textRenderer, tag, bx + 4, y + 2, 0xFFE4DCFF, false);
     }
 
     @Override
