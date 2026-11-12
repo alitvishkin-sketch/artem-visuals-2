@@ -1,13 +1,13 @@
-
-    package com.artem.visuals.crosshair;
+package com.artem.visuals.crosshair;
 
 import com.artem.visuals.config.ArtemConfig;
+import com.artem.visuals.gui.NeonButton;
 import com.artem.visuals.hud.HudManager;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.DrawContext;
 
 /**
- * Кастомный прицел.
+ * Кастомный прицел ARTEM VISUALS 3.0 с поддержкой RGB и динамики.
  */
 public final class CrosshairRenderer {
     private CrosshairRenderer() {}
@@ -25,7 +25,7 @@ public final class CrosshairRenderer {
         int size = c.crosshairSize;
         int gap = c.crosshairGap;
         int th = Math.max(1, c.crosshairThickness);
-        int color = c.crosshairColor;
+        int color = NeonButton.getDynamicColor(c.crosshairColor, 0);
 
         if (c.crosshairDynamic && HudManager.isAttackingRecently()) {
             gap += 3;
@@ -92,7 +92,7 @@ public final class CrosshairRenderer {
         int size = c.crosshairSize;
         int gap = c.crosshairGap;
         int th = Math.max(1, c.crosshairThickness);
-        int color = c.crosshairColor;
+        int color = NeonButton.getDynamicColor(c.crosshairColor, 0);
         int outline = c.crosshairOutline ? 0xBB000000 : 0;
         switch (c.crosshairStyle) {
             case 1 -> drawDot(ctx, cx, cy, size, color, outline);
