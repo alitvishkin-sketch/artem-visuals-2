@@ -5,6 +5,7 @@ import com.artem.visuals.config.ProfileManager;
 import com.artem.visuals.effects.EffectManager;
 import com.artem.visuals.gui.NeonButton;
 import com.artem.visuals.optimize.Optimizer;
+import com.mojang.blaze3d.systems.RenderSystem;
 import net.minecraft.block.BlockState;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.DrawContext;
@@ -14,6 +15,12 @@ import net.minecraft.client.network.AbstractClientPlayerEntity;
 import net.minecraft.client.network.ClientPlayNetworkHandler;
 import net.minecraft.client.network.PlayerListEntry;
 import net.minecraft.client.network.ServerInfo;
+import net.minecraft.client.render.BufferBuilder;
+import net.minecraft.client.render.BufferRenderer;
+import net.minecraft.client.render.GameRenderer;
+import net.minecraft.client.render.Tessellator;
+import net.minecraft.client.render.VertexFormat;
+import net.minecraft.client.render.VertexFormats;
 import net.minecraft.client.util.InputUtil;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.ItemEntity;
@@ -27,6 +34,7 @@ import net.minecraft.item.Items;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.MathHelper;
 import net.minecraft.world.Heightmap;
+import org.joml.Matrix4f;
 import org.lwjgl.glfw.GLFW;
 
 import java.awt.Color;
@@ -35,10 +43,22 @@ import java.time.format.DateTimeFormatter;
 import java.util.*;
 
 public final class HudManager {
+    public static final String[] CROSSHAIR_STYLE_NAMES = {
+            "Кольцо + точка",
+            "Тонкий крест",
+            "Косой X-крест",
+            "Шеврон PvP",
+            "Дуговые скобки",
+            "Гладкий ромб",
+            "Три-луч (120°)",
+            "Неоновая точка"
+    };
+
     private static final List<HudElement> ELEMENTS = new ArrayList<>();
     private static final long SESSION_START_MS = System.currentTimeMillis();
     private static final DateTimeFormatter CLOCK_FMT = DateTimeFormatter.ofPattern("HH:mm:ss");
     private static long lastAttackMs = 0;
+    private static long lastRenderNs = 0L;
 
     private static final long[] lmbTimestamps = new long[64];
     private static final long[] rmbTimestamps = new long[64];
@@ -56,8 +76,8 @@ public final class HudManager {
         ELEMENTS.add(new EventTimerElement());
         ELEMENTS.add(new InventoryElement());
         ELEMENTS.add(new PotionsElement());
-        ELEMENTS.add(new CooldownsElement());
         ELEMENTS.add(new PearlTimerElement());
+        ELEMENTS.add(new CooldownsElement());
         ELEMENTS.add(new HotKeysElement());
         ELEMENTS.add(new PaperdollElement());
         ELEMENTS.add(new TargetHudElement());
@@ -158,13 +178,276 @@ public final class HudManager {
     }
 
     public static void render(DrawContext ctx, float tickDelta) {
+        long nowNs = System.nanoTime();
+        if (nowNs - lastRenderNs < 1_000_000L) return;
+        lastRenderNs = nowNs;
+
         MinecraftClient mc = MinecraftClient.getInstance();
         if (mc == null || mc.options.hudHidden) return;
         NeonButton.syncTheme();
-        EffectManager.renderCustomCrosshair(ctx, mc);
         EffectManager.renderScreenOverlay(ctx, mc);
         ArtemConfig c = ArtemConfig.get();
         for (HudElement e : ELEMENTS) e.render(ctx, mc, c);
+    }
+
+    // === Гладкий векторный кастомный прицел (8 стилей без кубиков) ===
+    public static void renderCustomCrosshair(DrawContext ctx) {
+        MinecraftClient mc = MinecraftClient.getInstance();
+        if (mc == null || mc.getWindow() == null) return;
+        if (mc.options != null && !mc.options.getPerspective().isFirstPerson() && mc.options.hudHidden) return;
+
+        ArtemConfig c = ArtemConfig.get();
+        if (!c.customCrosshair) return;
+
+        float cx = mc.getWindow().getScaledWidth() * 0.5f;
+        float cy = mc.getWindow().getScaledHeight() * 0.5f;
+
+        float dyn = 0f;
+        if (c.crosshairDynamic && mc.player != null) {
+            if (isAttackingRecently()) dyn += 2.2f;
+            double speed = Math.hypot(mc.player.getX() - mc.player.prevX, mc.player.getZ() - mc.player.prevZ);
+            dyn += (float) Math.min(2.5, speed * 14.0);
+        }
+
+        int col = NeonButton.getDynamicColor(c.crosshairColor, 0);
+        renderCrosshairGeometry(ctx, cx, cy, c.crosshairStyle, c.crosshairSize, c.crosshairGap + dyn,
+                Math.max(0.65f, c.crosshairThickness * 0.75f), c.crosshairDot, c.crosshairOutline, col);
+    }
+
+    public static void renderCrosshairPreview(DrawContext ctx, float cx, float cy, int style, int color) {
+        renderCrosshairGeometry(ctx, cx, cy, style, 3.6f, 2.2f, 0.75f, true, true, color);
+    }
+
+    private static void renderCrosshairGeometry(DrawContext ctx, float cx, float cy, int style,
+                                                float size, float gap, float thick,
+                                                boolean dot, boolean outline, int color) {
+        Matrix4f mat = ctx.getMatrices().peek().getPositionMatrix();
+
+        RenderSystem.enableBlend();
+        RenderSystem.defaultBlendFunc();
+        RenderSystem.disableCull();
+        RenderSystem.setShader(GameRenderer::getPositionColorProgram);
+
+        Tessellator tess = Tessellator.getInstance();
+        BufferBuilder buf = tess.begin(VertexFormat.DrawMode.TRIANGLES, VertexFormats.POSITION_COLOR);
+        VertexBatch vb = new VertexBatch(buf, mat);
+
+        int shadowCol = 0xAA08080E;
+        int st = Math.floorMod(style, CROSSHAIR_STYLE_NAMES.length);
+
+        switch (st) {
+            case 0 -> { // Гладкое кольцо + точка
+                float r = Math.max(2.5f, gap + size * 0.65f);
+                if (outline) addSmoothRing(vb, cx, cy, r, thick + 0.9f, shadowCol, 48);
+                addSmoothRing(vb, cx, cy, r, thick, color, 48);
+                if (dot) {
+                    if (outline) addSmoothDisc(vb, cx, cy, Math.max(1.1f, thick * 0.9f + 0.5f), shadowCol, 24);
+                    addSmoothDisc(vb, cx, cy, Math.max(0.75f, thick * 0.85f), color, 24);
+                }
+            }
+            case 1 -> { // Тонкий заострённый крест
+                for (int i = 0; i < 4; i++) {
+                    double ang = i * (Math.PI * 0.5);
+                    float dx = (float) Math.cos(ang);
+                    float dy = (float) Math.sin(ang);
+                    float x1 = cx + dx * gap;
+                    float y1 = cy + dy * gap;
+                    float x2 = cx + dx * (gap + size);
+                    float y2 = cy + dy * (gap + size);
+                    if (outline) addTaperedSegment(vb, x1, y1, x2, y2, thick + 0.8f, 0.45f, shadowCol);
+                    addTaperedSegment(vb, x1, y1, x2, y2, thick, 0.25f, color);
+                }
+                if (dot) {
+                    if (outline) addSmoothDisc(vb, cx, cy, Math.max(1.0f, thick * 0.8f + 0.45f), shadowCol, 20);
+                    addSmoothDisc(vb, cx, cy, Math.max(0.7f, thick * 0.75f), color, 20);
+                }
+            }
+            case 2 -> { // Косой X-крест под 45°
+                for (int i = 0; i < 4; i++) {
+                    double ang = Math.PI * 0.25 + i * (Math.PI * 0.5);
+                    float dx = (float) Math.cos(ang);
+                    float dy = (float) Math.sin(ang);
+                    float x1 = cx + dx * gap;
+                    float y1 = cy + dy * gap;
+                    float x2 = cx + dx * (gap + size);
+                    float y2 = cy + dy * (gap + size);
+                    if (outline) addTaperedSegment(vb, x1, y1, x2, y2, thick + 0.8f, 0.45f, shadowCol);
+                    addTaperedSegment(vb, x1, y1, x2, y2, thick, 0.25f, color);
+                }
+                if (dot) addSmoothDisc(vb, cx, cy, Math.max(0.7f, thick * 0.75f), color, 20);
+            }
+            case 3 -> { // Тактический шеврон PvP (^)
+                float wing = size * 0.95f;
+                float drop = size * 0.65f;
+                float topY = cy - gap * 0.35f;
+                if (outline) {
+                    addTaperedSegment(vb, cx, topY, cx - wing, topY + drop, thick + 0.8f, 0.4f, shadowCol);
+                    addTaperedSegment(vb, cx, topY, cx + wing, topY + drop, thick + 0.8f, 0.4f, shadowCol);
+                }
+                addTaperedSegment(vb, cx, topY, cx - wing, topY + drop, thick, 0.25f, color);
+                addTaperedSegment(vb, cx, topY, cx + wing, topY + drop, thick, 0.25f, color);
+                if (dot) addSmoothDisc(vb, cx, cy + gap * 0.65f, Math.max(0.7f, thick * 0.75f), color, 20);
+            }
+            case 4 -> { // Дуговые скобки ( • )
+                float r = Math.max(3.2f, gap + size * 0.7f);
+                if (outline) {
+                    addSmoothArc(vb, cx, cy, r, thick + 0.85f, -0.78f, 0.78f, shadowCol, 24);
+                    addSmoothArc(vb, cx, cy, r, thick + 0.85f, (float) Math.PI - 0.78f, (float) Math.PI + 0.78f, shadowCol, 24);
+                }
+                addSmoothArc(vb, cx, cy, r, thick, -0.78f, 0.78f, color, 24);
+                addSmoothArc(vb, cx, cy, r, thick, (float) Math.PI - 0.78f, (float) Math.PI + 0.78f, color, 24);
+                if (dot) addSmoothDisc(vb, cx, cy, Math.max(0.75f, thick * 0.85f), color, 20);
+            }
+            case 5 -> { // Гладкий ромб
+                float r = Math.max(3.0f, gap + size * 0.75f);
+                float[] px = {cx, cx + r, cx, cx - r};
+                float[] py = {cy - r, cy, cy + r, cy};
+                for (int i = 0; i < 4; i++) {
+                    int next = (i + 1) % 4;
+                    if (outline) addSegment(vb, px[i], py[i], px[next], py[next], thick + 0.8f, shadowCol);
+                    addSegment(vb, px[i], py[i], px[next], py[next], thick, color);
+                }
+                if (dot) addSmoothDisc(vb, cx, cy, Math.max(0.7f, thick * 0.8f), color, 20);
+            }
+            case 6 -> { // Три-луч (120°)
+                for (int i = 0; i < 3; i++) {
+                    double ang = -Math.PI * 0.5 + i * (Math.PI * 2.0 / 3.0);
+                    float dx = (float) Math.cos(ang);
+                    float dy = (float) Math.sin(ang);
+                    float x1 = cx + dx * gap;
+                    float y1 = cy + dy * gap;
+                    float x2 = cx + dx * (gap + size);
+                    float y2 = cy + dy * (gap + size);
+                    if (outline) addTaperedSegment(vb, x1, y1, x2, y2, thick + 0.8f, 0.45f, shadowCol);
+                    addTaperedSegment(vb, x1, y1, x2, y2, thick, 0.25f, color);
+                }
+                if (dot) addSmoothDisc(vb, cx, cy, Math.max(0.7f, thick * 0.75f), color, 20);
+            }
+            default -> { // 7: Неоновая точка с мягким радиальным ореолом
+                int rgb = color & 0x00FFFFFF;
+                float haloR = Math.max(3.2f, size * 0.75f + 1.8f);
+                addRadialGlow(vb, cx, cy, haloR, (0x44 << 24) | rgb, rgb, 36);
+                if (outline) addSmoothDisc(vb, cx, cy, Math.max(1.25f, thick + 0.55f), shadowCol, 28);
+                addSmoothDisc(vb, cx, cy, Math.max(0.95f, thick + 0.25f), color, 28);
+            }
+        }
+
+        vb.flush();
+        RenderSystem.enableCull();
+        RenderSystem.disableBlend();
+    }
+
+    private static final class VertexBatch {
+        final BufferBuilder buf;
+        final Matrix4f mat;
+        int count = 0;
+
+        VertexBatch(BufferBuilder buf, Matrix4f mat) {
+            this.buf = buf;
+            this.mat = mat;
+        }
+
+        void tri(float x1, float y1, int c1, float x2, float y2, int c2, float x3, float y3, int c3) {
+            v(x1, y1, c1);
+            v(x2, y2, c2);
+            v(x3, y3, c3);
+        }
+
+        void quad(float x1, float y1, float x2, float y2, float x3, float y3, float x4, float y4, int col) {
+            tri(x1, y1, col, x2, y2, col, x3, y3, col);
+            tri(x1, y1, col, x3, y3, col, x4, y4, col);
+        }
+
+        private void v(float x, float y, int col) {
+            float a = ((col >>> 24) & 0xFF) / 255f;
+            float r = ((col >>> 16) & 0xFF) / 255f;
+            float g = ((col >>> 8) & 0xFF) / 255f;
+            float b = (col & 0xFF) / 255f;
+            buf.vertex(mat, x, y, 0f).color(r, g, b, a);
+            count++;
+        }
+
+        void flush() {
+            if (count > 0) {
+                BufferRenderer.drawWithGlobalProgram(buf.end());
+            }
+        }
+    }
+
+    private static void addSegment(VertexBatch vb, float x1, float y1, float x2, float y2, float thick, int col) {
+        addTaperedSegment(vb, x1, y1, x2, y2, thick, thick, col);
+    }
+
+    private static void addTaperedSegment(VertexBatch vb, float x1, float y1, float x2, float y2,
+                                          float startThick, float endThick, int col) {
+        float dx = x2 - x1;
+        float dy = y2 - y1;
+        float len = (float) Math.hypot(dx, dy);
+        if (len < 0.001f) return;
+        float nx = -dy / len;
+        float ny = dx / len;
+        float hs = startThick * 0.5f;
+        float he = endThick * 0.5f;
+
+        vb.quad(
+                x1 + nx * hs, y1 + ny * hs,
+                x1 - nx * hs, y1 - ny * hs,
+                x2 - nx * he, y2 - ny * he,
+                x2 + nx * he, y2 + ny * he,
+                col
+        );
+    }
+
+    private static void addSmoothRing(VertexBatch vb, float cx, float cy, float radius, float thick, int col, int segs) {
+        addSmoothArc(vb, cx, cy, radius, thick, 0f, (float) (Math.PI * 2.0), col, segs);
+    }
+
+    private static void addSmoothArc(VertexBatch vb, float cx, float cy, float radius, float thick,
+                                     float startRad, float endRad, int col, int segs) {
+        float rIn = Math.max(0.1f, radius - thick * 0.5f);
+        float rOut = radius + thick * 0.5f;
+        float step = (endRad - startRad) / segs;
+
+        for (int i = 0; i < segs; i++) {
+            float a1 = startRad + step * i;
+            float a2 = a1 + step;
+            float c1 = (float) Math.cos(a1), s1 = (float) Math.sin(a1);
+            float c2 = (float) Math.cos(a2), s2 = (float) Math.sin(a2);
+
+            vb.quad(
+                    cx + c1 * rIn, cy + s1 * rIn,
+                    cx + c1 * rOut, cy + s1 * rOut,
+                    cx + c2 * rOut, cy + s2 * rOut,
+                    cx + c2 * rIn, cy + s2 * rIn,
+                    col
+            );
+        }
+    }
+
+    private static void addSmoothDisc(VertexBatch vb, float cx, float cy, float radius, int col, int segs) {
+        float step = (float) (Math.PI * 2.0 / segs);
+        for (int i = 0; i < segs; i++) {
+            float a1 = step * i;
+            float a2 = a1 + step;
+            vb.tri(
+                    cx, cy, col,
+                    cx + (float) Math.cos(a1) * radius, cy + (float) Math.sin(a1) * radius, col,
+                    cx + (float) Math.cos(a2) * radius, cy + (float) Math.sin(a2) * radius, col
+            );
+        }
+    }
+
+    private static void addRadialGlow(VertexBatch vb, float cx, float cy, float radius, int centerCol, int edgeCol, int segs) {
+        float step = (float) (Math.PI * 2.0 / segs);
+        for (int i = 0; i < segs; i++) {
+            float a1 = step * i;
+            float a2 = a1 + step;
+            vb.tri(
+                    cx, cy, centerCol,
+                    cx + (float) Math.cos(a1) * radius, cy + (float) Math.sin(a1) * radius, edgeCol,
+                    cx + (float) Math.cos(a2) * radius, cy + (float) Math.sin(a2) * radius, edgeCol
+            );
+        }
     }
 
     public static void recordClick() {
@@ -245,10 +528,9 @@ public final class HudManager {
         c.smallSword = true; c.noHurtCam = true; c.lowFire = true;
         c.autoSprint = true; c.lowArmorAlert = true; c.potionExpiryAlert = true;
         c.deathCoords = true; c.autoDeathWaypoint = true;
-        c.pearlTimer = true; c.pearlTrajectory = true; c.showPearlHud = true;
-        c.trapPlastPreview = true;
-        c.crosshairStyle = 0; c.crosshairSize = 5; c.crosshairGap = 3; c.crosshairThickness = 1.4f;
-        c.crosshairOutline = true; c.crosshairDynamic = true; c.crosshairColor = 0xFFE8E8F4;
+        c.pearlTimer = true; c.pearlTrajectory = true; c.showPearlHud = true; c.trapPlastPreview = true;
+        c.crosshairStyle = 0; c.crosshairSize = 5; c.crosshairGap = 3; c.crosshairThickness = 1;
+        c.crosshairDot = true; c.crosshairOutline = true; c.crosshairDynamic = true; c.crosshairColor = 0xFFE8E8F4;
         c.save();
         if (mc != null) { Optimizer.applyLighting(mc); Optimizer.applyPerformancePreset(mc); }
     }
@@ -349,66 +631,6 @@ public final class HudManager {
             return Math.max(8, (screenW() - scaledW) / 2);
         }
         @Override protected int defaultY() { return 21; }
-    }
-
-    // Окно секунд эндер-жемчуга слева на экране
-    static class PearlTimerElement extends HudElement {
-        PearlTimerElement() { super("pearl_timer"); }
-        @Override public boolean isEnabled(ArtemConfig c) { return c.showPearlHud; }
-        @Override public String getText(MinecraftClient mc) { return "Эндер-жемчуг"; }
-        @Override public int getColor(MinecraftClient mc) { return NeonButton.getDynamicColor(ArtemConfig.get().pearlColor, 0); }
-
-        private List<EffectManager.PearlHudInfo> rows(MinecraftClient mc, ArtemConfig c) {
-            List<EffectManager.PearlHudInfo> list = EffectManager.getActivePearls(mc);
-            if (list.isEmpty() && c.hudEditMode) {
-                list.add(new EffectManager.PearlHudInfo(0, 2.35f, 0.72f, 64.0, true));
-            }
-            return list;
-        }
-
-        @Override protected void measure(MinecraftClient mc) {
-            List<EffectManager.PearlHudInfo> list = rows(mc, ArtemConfig.get());
-            if (list.isEmpty()) { width = 0; height = 0; return; }
-            width = 104;
-            height = 16 + list.size() * 14;
-        }
-
-        @Override protected void renderBody(DrawContext ctx, MinecraftClient mc, ArtemConfig c, int x, int y) {
-            List<EffectManager.PearlHudInfo> list = rows(mc, c);
-            if (list.isEmpty()) return;
-
-            int pCol = NeonButton.getDynamicColor(c.pearlColor, 0);
-            NeonButton.fillGradientRounded(ctx, x, y, width, height, 5, NeonButton.HUD_BG_TOP, NeonButton.HUD_BG_BOTTOM);
-            NeonButton.drawSmoothRoundedOutline(ctx, x, y, width, height, 5, (pCol & 0x00FFFFFF) | 0x66000000);
-
-            NeonButton.drawCircle(ctx, x + 7, y + 6, 2, pCol);
-            ctx.drawText(mc.textRenderer, "Перл (сек.)", x + 13, y + 3, 0xFFEAEAF6, false);
-
-            int ry = y + 15;
-            for (EffectManager.PearlHudInfo info : list) {
-                ctx.getMatrices().push();
-                ctx.getMatrices().translate(x + 4, ry - 1, 0);
-                ctx.getMatrices().scale(0.66f, 0.66f, 1f);
-                ctx.drawItem(new ItemStack(Items.ENDER_PEARL), 0, 0);
-                ctx.getMatrices().pop();
-
-                String secStr = String.format(Locale.US, "%.2f с", info.remainingSeconds());
-                String distStr = Math.round(info.distance()) + "m";
-                ctx.drawText(mc.textRenderer, secStr, x + 17, ry, pCol, false);
-                ctx.drawText(mc.textRenderer, distStr, x + width - mc.textRenderer.getWidth(distStr) - 5, ry, 0xFF9A9AB2, false);
-
-                int barX = x + 17;
-                int barY = ry + 9;
-                int barW = width - 22;
-                NeonButton.fillSmoothRounded(ctx, barX, barY, barW, 2, 1, 0xFF222232);
-                int fillW = Math.max(2, Math.round(barW * info.progress()));
-                NeonButton.fillGradientRounded(ctx, barX, barY, fillW, 2, 1, pCol, 0xFFFFFFFF);
-                ry += 14;
-            }
-        }
-
-        @Override protected int defaultX() { return 6; }
-        @Override protected int defaultY() { return 184; }
     }
 
     static class InventoryElement extends HudElement {
@@ -515,6 +737,75 @@ public final class HudManager {
         @Override protected int defaultY() { return 52; }
     }
 
+    // Окно слева с таймером полёта эндер-жемчуга в секундах
+    static class PearlTimerElement extends HudElement {
+        PearlTimerElement() { super("pearl_timer"); }
+        @Override public boolean isEnabled(ArtemConfig c) { return c.showPearlHud; }
+        @Override public String getText(MinecraftClient mc) { return "Pearl Timer"; }
+        @Override public int getColor(MinecraftClient mc) { return NeonButton.getDynamicColor(ArtemConfig.get().pearlColor, 0); }
+
+        @Override protected void measure(MinecraftClient mc) {
+            ArtemConfig c = ArtemConfig.get();
+            List<EffectManager.TrackedPearl> list = EffectManager.getActivePearls();
+            if (list.isEmpty() && !c.hudEditMode) {
+                width = 0;
+                height = 0;
+                return;
+            }
+            int rows = list.isEmpty() ? 1 : Math.min(3, list.size());
+            width = 96;
+            height = 16 + rows * 13;
+        }
+
+        @Override protected void renderBody(DrawContext ctx, MinecraftClient mc, ArtemConfig c, int x, int y) {
+            List<EffectManager.TrackedPearl> list = EffectManager.getActivePearls();
+            if (list.isEmpty() && !c.hudEditMode) return;
+
+            int pCol = NeonButton.getDynamicColor(c.pearlColor, 0);
+            NeonButton.fillGradientRounded(ctx, x, y, width, height, 5, NeonButton.HUD_BG_TOP, NeonButton.HUD_BG_BOTTOM);
+            NeonButton.drawSmoothRoundedOutline(ctx, x, y, width, height, 5, (pCol & 0x00FFFFFF) | 0x55000000);
+            NeonButton.drawCircle(ctx, x + 7, y + 6, 2, pCol);
+            ctx.drawText(mc.textRenderer, "Pearl Timer", x + 13, y + 3, 0xFFEAEAF6, false);
+
+            long now = System.currentTimeMillis();
+            ItemStack pearlIcon = new ItemStack(Items.ENDER_PEARL);
+
+            if (list.isEmpty()) {
+                renderPearlRow(ctx, mc, x, y + 15, width, pearlIcon, "Жемчуг", 1.35f, 0.72f, pCol);
+            } else {
+                int ry = y + 15;
+                for (int i = 0; i < Math.min(3, list.size()); i++) {
+                    EffectManager.TrackedPearl tp = list.get(i);
+                    String label = tp.ownerName.length() > 8 ? tp.ownerName.substring(0, 7) + "…" : tp.ownerName;
+                    renderPearlRow(ctx, mc, x, ry, width, pearlIcon, label, tp.remainingSeconds(now), tp.progress(now), pCol);
+                    ry += 13;
+                }
+            }
+        }
+
+        private void renderPearlRow(DrawContext ctx, MinecraftClient mc, int x, int y, int w,
+                                    ItemStack icon, String label, float sec, float prog, int col) {
+            ctx.getMatrices().push();
+            ctx.getMatrices().translate(x + 4, y - 1, 0);
+            ctx.getMatrices().scale(0.65f, 0.65f, 1f);
+            ctx.drawItem(icon, 0, 0);
+            ctx.getMatrices().pop();
+
+            String secTxt = String.format(Locale.US, "%.2fс", sec);
+            ctx.drawText(mc.textRenderer, label, x + 17, y, 0xFFE6E6F2, false);
+            ctx.drawText(mc.textRenderer, secTxt, x + w - mc.textRenderer.getWidth(secTxt) - 5, y, col, false);
+
+            int barX = x + 17;
+            int barW = w - 22;
+            NeonButton.fillSmoothRounded(ctx, barX, y + 9, barW, 2, 1, 0xFF222232);
+            int fillW = Math.max(2, Math.round(barW * prog));
+            NeonButton.fillGradientRounded(ctx, barX, y + 9, fillW, 2, 1, col, 0xFFFFFFFF);
+        }
+
+        @Override protected int defaultX() { return 6; }
+        @Override protected int defaultY() { return 142; }
+    }
+
     static class CooldownsElement extends HudElement {
         private static final Object[][] TRACKED = {
                 {Items.ENDER_PEARL, "Жемчуг"},
@@ -589,7 +880,7 @@ public final class HudManager {
         }
 
         @Override protected int defaultX() { return 6; }
-        @Override protected int defaultY() { return 142; }
+        @Override protected int defaultY() { return 184; }
     }
 
     static class HotKeysElement extends HudElement {
