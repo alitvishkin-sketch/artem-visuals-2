@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "id": "artemvisuals",
+  "version": "${version}",
+  "name": "Artem Visuals",
+  "description": "Неоновые визуальные эффекты, кастомный HUD, прицел, профили и оптимизация FPS. Клиентский мод.",
+  "authors": ["Artem"],
+  "contact": {},
+  "license": "MIT",
+  "icon": "assets/artemvisuals/icon.png",
+  "environment": "client",
+  "entrypoints": {
+    "client": ["com.artem.visuals.ArtemVisualsClient"]
+  },
+  "depends": {
+    "fabricloader": ">=0.16.0",
+    "minecraft": "~1.21.1",
+    "java": ">=21",
+    "fabric-api": "*"
+  }
+}
