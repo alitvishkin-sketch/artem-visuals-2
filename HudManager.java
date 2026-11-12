@@ -21,7 +21,9 @@ import net.minecraft.entity.LivingEntity;
 import net.minecraft.entity.effect.StatusEffectInstance;
 import net.minecraft.entity.mob.MobEntity;
 import net.minecraft.entity.player.PlayerEntity;
+import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
+import net.minecraft.item.Items;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.MathHelper;
 import net.minecraft.world.Heightmap;
@@ -51,8 +53,10 @@ public final class HudManager {
 
     static {
         ELEMENTS.add(new TopBarElement());
+        ELEMENTS.add(new EventTimerElement());
         ELEMENTS.add(new InventoryElement());
         ELEMENTS.add(new PotionsElement());
+        ELEMENTS.add(new CooldownsElement());
         ELEMENTS.add(new HotKeysElement());
         ELEMENTS.add(new PaperdollElement());
         ELEMENTS.add(new TargetHudElement());
@@ -219,6 +223,7 @@ public final class HudManager {
         c.showPaperdoll = true;
         c.showTargetHud = true;
         c.showArmor = true;
+        c.showCooldowns = true;
         c.handGlow = true;
 
         c.showArrayList = false; c.showXyz = false; c.showFps = false;
@@ -235,6 +240,8 @@ public final class HudManager {
         c.targetEsp = true; c.jumpCircle = true; c.blockOverlay = true;
         c.renderTweaks = true; c.softLighting = true; c.customCrosshair = true;
         c.smallSword = true; c.noHurtCam = true; c.lowFire = true;
+        c.autoSprint = true; c.lowArmorAlert = true; c.potionExpiryAlert = true;
+        c.deathCoords = true; c.autoDeathWaypoint = true;
         c.crosshairStyle = 0; c.crosshairSize = 4; c.crosshairGap = 2; c.crosshairThickness = 1;
         c.crosshairOutline = true; c.crosshairDynamic = true; c.crosshairColor = 0xFFE8E8F4;
         c.save();
@@ -315,7 +322,28 @@ public final class HudManager {
         @Override protected int defaultY() { return 6; }
     }
 
-    // 2. Мини-инвентарь в верхнем левом углу (как в Andromeda Visuals)
+    // Таймер ивента (под верхней панелью)
+    static class EventTimerElement extends HudElement {
+        EventTimerElement() { super("event_timer"); }
+        @Override public boolean isEnabled(ArtemConfig c) {
+            return c.showEventTimer || c.eventEndTimeMs > System.currentTimeMillis();
+        }
+        @Override public String getText(MinecraftClient mc) {
+            ArtemConfig c = ArtemConfig.get();
+            long rem = Math.max(0L, c.eventEndTimeMs - System.currentTimeMillis());
+            long sec = rem / 1000L;
+            return c.eventName + " " + String.format("%02d:%02d", sec / 60, sec % 60);
+        }
+        @Override public int getColor(MinecraftClient mc) { return NeonButton.getHudAccentBright(0); }
+        @Override protected int defaultX() {
+            measure(MinecraftClient.getInstance());
+            int scaledW = Math.round(width * ArtemConfig.get().hudScale);
+            return Math.max(8, (screenW() - scaledW) / 2);
+        }
+        @Override protected int defaultY() { return 21; }
+    }
+
+    // 2. Мини-инвентарь в верхнем левом углу
     static class InventoryElement extends HudElement {
         InventoryElement() { super("inventory"); }
         @Override public boolean isEnabled(ArtemConfig c) { return c.showInventory; }
@@ -328,7 +356,6 @@ public final class HudManager {
             NeonButton.fillGradientRounded(ctx, x, y, width, height, 5, NeonButton.HUD_BG_TOP, NeonButton.HUD_BG_BOTTOM);
             NeonButton.drawSmoothRoundedOutline(ctx, x, y, width, height, 5, glassBorder());
 
-            // Иконка сундучка + заголовок
             NeonButton.fillSmoothRounded(ctx, x + 5, y + 4, 6, 5, 1, accB);
             ctx.drawText(mc.textRenderer, "Inventory", x + 14, y + 3, 0xFFEAEAF6, false);
             ctx.fill(x + 4, y + 13, x + width - 4, y + 14, 0x18FFFFFF);
@@ -422,7 +449,85 @@ public final class HudManager {
         @Override protected int defaultY() { return 52; }
     }
 
-    // 4. Keybinds (слева по центру, под эффектами)
+    // Виджет кулдаунов предметов (Хелпер)
+    static class CooldownsElement extends HudElement {
+        private static final Object[][] TRACKED = {
+                {Items.ENDER_PEARL, "Жемчуг"},
+                {Items.ENCHANTED_GOLDEN_APPLE, "Чарка"},
+                {Items.GOLDEN_APPLE, "Гепл"},
+                {Items.CHORUS_FRUIT, "Хорус"},
+                {Items.SHIELD, "Щит"},
+                {Items.WIND_CHARGE, "Заряд"},
+                {Items.FIREWORK_ROCKET, "Фейерверк"}
+        };
+
+        CooldownsElement() { super("cooldowns"); }
+        @Override public boolean isEnabled(ArtemConfig c) { return c.showCooldowns; }
+        @Override public String getText(MinecraftClient mc) { return "Cooldowns"; }
+        @Override public int getColor(MinecraftClient mc) { return NeonButton.getHudAccentBright(0); }
+
+        private List<Object[]> active(MinecraftClient mc, ArtemConfig c) {
+            List<Object[]> list = new ArrayList<>();
+            if (mc.player != null) {
+                for (Object[] entry : TRACKED) {
+                    Item item = (Item) entry[0];
+                    float prog = mc.player.getItemCooldownManager().getCooldownProgress(item, 0f);
+                    if (prog > 0.01f) {
+                        list.add(new Object[]{new ItemStack(item), entry[1], prog});
+                    }
+                }
+            }
+            if (list.isEmpty() && c.hudEditMode) {
+                list.add(new Object[]{new ItemStack(Items.ENDER_PEARL), "Жемчуг", 0.65f});
+                list.add(new Object[]{new ItemStack(Items.GOLDEN_APPLE), "Гепл", 0.35f});
+            }
+            return list;
+        }
+
+        @Override protected void measure(MinecraftClient mc) {
+            List<Object[]> list = active(mc, ArtemConfig.get());
+            if (list.isEmpty()) { width = 0; height = 0; return; }
+            width = 94;
+            height = 16 + list.size() * 11;
+        }
+
+        @Override protected void renderBody(DrawContext ctx, MinecraftClient mc, ArtemConfig c, int x, int y) {
+            List<Object[]> list = active(mc, c);
+            if (list.isEmpty()) return;
+            int acc = NeonButton.getHudAccent(0);
+            int accB = NeonButton.getHudAccentBright(0);
+            NeonButton.fillGradientRounded(ctx, x, y, width, height, 5, NeonButton.HUD_BG_TOP, NeonButton.HUD_BG_BOTTOM);
+            NeonButton.drawSmoothRoundedOutline(ctx, x, y, width, height, 5, glassBorder());
+            NeonButton.drawCircle(ctx, x + 7, y + 6, 2, accB);
+            ctx.drawText(mc.textRenderer, "Cooldowns", x + 13, y + 3, 0xFFEAEAF6, false);
+
+            int ry = y + 15;
+            for (Object[] row : list) {
+                ItemStack st = (ItemStack) row[0];
+                String label = (String) row[1];
+                float prog = (float) row[2];
+
+                ctx.getMatrices().push();
+                ctx.getMatrices().translate(x + 4, ry - 1, 0);
+                ctx.getMatrices().scale(0.62f, 0.62f, 1f);
+                ctx.drawItem(st, 0, 0);
+                ctx.getMatrices().pop();
+
+                ctx.drawText(mc.textRenderer, label, x + 16, ry, 0xFFE6E6F2, false);
+                int barX = x + 56;
+                int barW = width - 61;
+                NeonButton.fillSmoothRounded(ctx, barX, ry + 3, barW, 3, 1, 0xFF222232);
+                int fillW = Math.max(2, Math.round(barW * prog));
+                NeonButton.fillGradientRounded(ctx, barX, ry + 3, fillW, 3, 1, acc, accB);
+                ry += 11;
+            }
+        }
+
+        @Override protected int defaultX() { return 6; }
+        @Override protected int defaultY() { return 142; }
+    }
+
+    // 4. Keybinds (слева по центру)
     static class HotKeysElement extends HudElement {
         HotKeysElement() { super("hotkeys"); }
         @Override public boolean isEnabled(ArtemConfig c) { return c.showHotKeys; }
@@ -433,6 +538,7 @@ public final class HudManager {
             List<String[]> list = new ArrayList<>();
             list.add(new String[]{"ClickGUI", "RSHIFT"});
             list.add(new String[]{"Zoom", "C"});
+            if (c.ahSearchHandItem) list.add(new String[]{"AH Search", "H"});
             for (Map.Entry<String, Integer> e : c.keybinds.entrySet()) {
                 if (e.getValue() != null && e.getValue() > 0) {
                     String keyName = InputUtil.Type.KEYSYM.createFromCode(e.getValue()).getLocalizedText().getString().toUpperCase();
@@ -467,7 +573,7 @@ public final class HudManager {
         @Override protected int defaultY() { return 96; }
     }
 
-    // 5. Мини-моделька игрока в левом нижнем углу (Paperdoll)
+    // 5. Мини-моделька игрока в левом нижнем углу
     static class PaperdollElement extends HudElement {
         PaperdollElement() { super("paperdoll"); }
         @Override public boolean isEnabled(ArtemConfig c) { return c.showPaperdoll; }
@@ -499,7 +605,7 @@ public final class HudManager {
         @Override protected int defaultY() { return Math.max(120, screenH() - 56); }
     }
 
-    // 6. TargetHUD (в верхнем правом углу, не перекрывает TopBar)
+    // 6. TargetHUD (в верхнем правом углу + подсветка друзей)
     static class TargetHudElement extends HudElement {
         private float smoothHp = 20f;
         TargetHudElement() { super("target"); }
@@ -529,24 +635,27 @@ public final class HudManager {
             smoothHp += (hp - smoothHp) * 0.25f;
             float ratio = Math.min(1f, Math.max(0f, smoothHp / maxHp));
 
-            int acc = NeonButton.getHudAccent(0);
-            int accB = NeonButton.getHudAccentBright(0);
+            String rawName = t.getName().getString();
+            boolean isFriend = (t instanceof PlayerEntity) && c.highlightFriends && c.isFriend(rawName);
+            int acc = isFriend ? c.friendColor : NeonButton.getHudAccent(0);
+            int accB = isFriend ? c.friendColor : NeonButton.getHudAccentBright(0);
 
             NeonButton.fillGradientRounded(ctx, x, y, width, height, 5, NeonButton.HUD_BG_TOP, NeonButton.HUD_BG_BOTTOM);
-            NeonButton.drawSmoothRoundedOutline(ctx, x, y, width, height, 5, glassBorder());
+            NeonButton.drawSmoothRoundedOutline(ctx, x, y, width, height, 5,
+                    isFriend ? ((c.friendColor & 0x00FFFFFF) | 0x88000000) : glassBorder());
             int ax = x + 3, ay = y + 3, av = 19;
             NeonButton.fillSmoothRounded(ctx, ax, ay, av, av, 3, 0xFF1A1A28);
 
-            String name = t.getName().getString();
             if (t instanceof AbstractClientPlayerEntity p) {
                 PlayerSkinDrawer.draw(ctx, p.getSkinTextures().texture(), ax + 1, ay + 1, av - 2);
             } else {
-                String ini = name.isEmpty() ? "?" : name.substring(0, 1).toUpperCase();
+                String ini = rawName.isEmpty() ? "?" : rawName.substring(0, 1).toUpperCase();
                 ctx.drawText(mc.textRenderer, ini, ax + 6, ay + 5, accB, false);
             }
+            String name = (isFriend ? "★ " : "") + rawName;
             if (name.length() > 12) name = name.substring(0, 11) + "…";
             int tx = ax + av + 5;
-            ctx.drawText(mc.textRenderer, name, tx, y + 3, 0xFFF2F2FA, false);
+            ctx.drawText(mc.textRenderer, name, tx, y + 3, isFriend ? c.friendColor : 0xFFF2F2FA, false);
             ctx.drawText(mc.textRenderer, String.format("%.1f HP", hp), tx, y + 12, accB, false);
 
             int barW = width - (tx - x) - 4;
@@ -561,7 +670,7 @@ public final class HudManager {
         @Override protected int defaultY() { return 6; }
     }
 
-    // 7. Броня с реальной полоской прочности и правильным порядком слотов
+    // 7. Броня с реальной прочностью
     static class ArmorElement extends HudElement {
         ArmorElement() { super("armor"); }
         @Override public boolean isEnabled(ArtemConfig c) { return c.showArmor; }
@@ -635,6 +744,7 @@ public final class HudManager {
 
         private List<String> mods(ArtemConfig c) {
             List<String> l = new ArrayList<>();
+            if (c.autoSprint) l.add("AutoSprint");
             if (c.smallSword) l.add("SmallSword");
             if (c.esp) l.add("ESP"); if (c.playerHighlight) l.add("PlayerHighlight");
             if (c.tracers) l.add("Tracers"); if (c.chams) l.add("Chams");
@@ -838,7 +948,9 @@ public final class HudManager {
                 if (dx * dx + dz * dz > 48 * 48) continue;
                 int px = MathHelper.clamp((int) Math.round(cx + (dx * cos - dz * sin) * 0.40), x + 3, x + width - 4);
                 int py = MathHelper.clamp((int) Math.round(cy + (dx * sin + dz * cos) * 0.40), y + 3, y + height - 4);
-                int col = (e instanceof PlayerEntity) ? accB : (e instanceof MobEntity) ? 0xFFFFB703 : (e instanceof ItemEntity) ? 0xFF00F5FF : 0;
+                int col = (e instanceof PlayerEntity pe)
+                        ? (c.highlightFriends && c.isFriend(pe.getName().getString()) ? c.friendColor : accB)
+                        : (e instanceof MobEntity) ? 0xFFFFB703 : (e instanceof ItemEntity) ? 0xFF00F5FF : 0;
                 if (col != 0) NeonButton.drawCircle(ctx, px, py, 1, col);
             }
         }
