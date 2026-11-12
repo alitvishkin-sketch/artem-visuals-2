@@ -124,7 +124,6 @@ public final class EffectManager {
             client.world.setTimeOfDay(targetTime);
         }
 
-        // Шлейфы стрел, жемчуга и снежков
         if (c.projectileTrails) {
             Set<Integer> aliveIds = new HashSet<>();
             for (Entity e : client.world.getEntities()) {
@@ -230,11 +229,21 @@ public final class EffectManager {
         int sw = mc.getWindow().getScaledWidth();
         int sh = mc.getWindow().getScaledHeight();
 
-        // Мягкая кинематографичная виньетка по краям экрана
+        // Мягкое неоновое свечение за предметами в руках (стиль Andromeda Visuals)
+        if (c.handGlow && mc.options.getPerspective().isFirstPerson()) {
+            int rgb = NeonButton.getHudAccent(0) & 0x00FFFFFF;
+            if (!mc.player.getOffHandStack().isEmpty()) {
+                drawSoftHandAura(ctx, 56, sh - 34, 34, rgb);
+            }
+            if (!mc.player.getMainHandStack().isEmpty()) {
+                drawSoftHandAura(ctx, sw - 46, sh - 32, 36, rgb);
+            }
+        }
+
         if (c.screenVignette) {
-            int vig = 0x2605050A;
-            ctx.fillGradient(0, 0, sw, 18, vig, 0x00000000);
-            ctx.fillGradient(0, sh - 18, sw, sh, 0x00000000, vig);
+            int vig = 0x2205050A;
+            ctx.fillGradient(0, 0, sw, 16, vig, 0x00000000);
+            ctx.fillGradient(0, sh - 16, sw, sh, 0x00000000, vig);
         }
 
         if (c.worldCustomizer && c.colorCorrection) {
@@ -271,7 +280,7 @@ public final class EffectManager {
                     int py = (int) Math.round(screen[1] - th);
 
                     NeonButton.fillSmoothRounded(ctx, px, py, tw, th, 3, NeonButton.HUD_BG_TOP);
-                    NeonButton.drawSmoothRoundedOutline(ctx, px, py, tw, th, 3, (NeonButton.HUD_ACCENT & 0x00FFFFFF) | 0x55000000);
+                    NeonButton.drawSmoothRoundedOutline(ctx, px, py, tw, th, 3, 0x26FFFFFF);
 
                     int tx = px + 4, ty = py + 2;
                     ctx.drawText(mc.textRenderer, name, tx, ty, 0xFFF4F4FC, false);
@@ -310,6 +319,14 @@ public final class EffectManager {
                 ctx.drawText(mc.textRenderer, String.format("-%.1f", pop.amount),
                         (int) Math.round(screen[0]) - 8, (int) Math.round(screen[1]) - 6, (alpha << 24) | 0xFF4D6D, true);
             }
+        }
+    }
+
+    private static void drawSoftHandAura(DrawContext ctx, int cx, int cy, int maxR, int rgb) {
+        for (int step = 5; step >= 1; step--) {
+            int r = (maxR * step) / 5;
+            int alpha = Math.max(2, 12 - step * 2);
+            NeonButton.drawCircle(ctx, cx, cy, r, (alpha << 24) | rgb);
         }
     }
 
@@ -372,7 +389,6 @@ public final class EffectManager {
             }
         }
 
-        // Шлейфы снарядов
         if (c.projectileTrails && !PROJECTILE_TRAILS.isEmpty()) {
             for (LinkedList<Vec3d> pts : PROJECTILE_TRAILS.values()) {
                 int total = pts.size(), idx = 0;
