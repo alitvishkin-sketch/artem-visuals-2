@@ -57,6 +57,7 @@ public final class HudManager {
         ELEMENTS.add(new InventoryElement());
         ELEMENTS.add(new PotionsElement());
         ELEMENTS.add(new CooldownsElement());
+        ELEMENTS.add(new PearlTimerElement());
         ELEMENTS.add(new HotKeysElement());
         ELEMENTS.add(new PaperdollElement());
         ELEMENTS.add(new TargetHudElement());
@@ -160,6 +161,7 @@ public final class HudManager {
         MinecraftClient mc = MinecraftClient.getInstance();
         if (mc == null || mc.options.hudHidden) return;
         NeonButton.syncTheme();
+        EffectManager.renderCustomCrosshair(ctx, mc);
         EffectManager.renderScreenOverlay(ctx, mc);
         ArtemConfig c = ArtemConfig.get();
         for (HudElement e : ELEMENTS) e.render(ctx, mc, c);
@@ -224,6 +226,7 @@ public final class HudManager {
         c.showTargetHud = true;
         c.showArmor = true;
         c.showCooldowns = true;
+        c.showPearlHud = true;
         c.handGlow = true;
 
         c.showArrayList = false; c.showXyz = false; c.showFps = false;
@@ -242,8 +245,9 @@ public final class HudManager {
         c.smallSword = true; c.noHurtCam = true; c.lowFire = true;
         c.autoSprint = true; c.lowArmorAlert = true; c.potionExpiryAlert = true;
         c.deathCoords = true; c.autoDeathWaypoint = true;
-        c.pearlTimer = true; c.pearlTrajectory = true; c.trapPlastPreview = true;
-        c.crosshairStyle = 0; c.crosshairSize = 4; c.crosshairGap = 2; c.crosshairThickness = 1;
+        c.pearlTimer = true; c.pearlTrajectory = true; c.showPearlHud = true;
+        c.trapPlastPreview = true;
+        c.crosshairStyle = 0; c.crosshairSize = 5; c.crosshairGap = 3; c.crosshairThickness = 1.4f;
         c.crosshairOutline = true; c.crosshairDynamic = true; c.crosshairColor = 0xFFE8E8F4;
         c.save();
         if (mc != null) { Optimizer.applyLighting(mc); Optimizer.applyPerformancePreset(mc); }
@@ -345,6 +349,66 @@ public final class HudManager {
             return Math.max(8, (screenW() - scaledW) / 2);
         }
         @Override protected int defaultY() { return 21; }
+    }
+
+    // Окно секунд эндер-жемчуга слева на экране
+    static class PearlTimerElement extends HudElement {
+        PearlTimerElement() { super("pearl_timer"); }
+        @Override public boolean isEnabled(ArtemConfig c) { return c.showPearlHud; }
+        @Override public String getText(MinecraftClient mc) { return "Эндер-жемчуг"; }
+        @Override public int getColor(MinecraftClient mc) { return NeonButton.getDynamicColor(ArtemConfig.get().pearlColor, 0); }
+
+        private List<EffectManager.PearlHudInfo> rows(MinecraftClient mc, ArtemConfig c) {
+            List<EffectManager.PearlHudInfo> list = EffectManager.getActivePearls(mc);
+            if (list.isEmpty() && c.hudEditMode) {
+                list.add(new EffectManager.PearlHudInfo(0, 2.35f, 0.72f, 64.0, true));
+            }
+            return list;
+        }
+
+        @Override protected void measure(MinecraftClient mc) {
+            List<EffectManager.PearlHudInfo> list = rows(mc, ArtemConfig.get());
+            if (list.isEmpty()) { width = 0; height = 0; return; }
+            width = 104;
+            height = 16 + list.size() * 14;
+        }
+
+        @Override protected void renderBody(DrawContext ctx, MinecraftClient mc, ArtemConfig c, int x, int y) {
+            List<EffectManager.PearlHudInfo> list = rows(mc, c);
+            if (list.isEmpty()) return;
+
+            int pCol = NeonButton.getDynamicColor(c.pearlColor, 0);
+            NeonButton.fillGradientRounded(ctx, x, y, width, height, 5, NeonButton.HUD_BG_TOP, NeonButton.HUD_BG_BOTTOM);
+            NeonButton.drawSmoothRoundedOutline(ctx, x, y, width, height, 5, (pCol & 0x00FFFFFF) | 0x66000000);
+
+            NeonButton.drawCircle(ctx, x + 7, y + 6, 2, pCol);
+            ctx.drawText(mc.textRenderer, "Перл (сек.)", x + 13, y + 3, 0xFFEAEAF6, false);
+
+            int ry = y + 15;
+            for (EffectManager.PearlHudInfo info : list) {
+                ctx.getMatrices().push();
+                ctx.getMatrices().translate(x + 4, ry - 1, 0);
+                ctx.getMatrices().scale(0.66f, 0.66f, 1f);
+                ctx.drawItem(new ItemStack(Items.ENDER_PEARL), 0, 0);
+                ctx.getMatrices().pop();
+
+                String secStr = String.format(Locale.US, "%.2f с", info.remainingSeconds());
+                String distStr = Math.round(info.distance()) + "m";
+                ctx.drawText(mc.textRenderer, secStr, x + 17, ry, pCol, false);
+                ctx.drawText(mc.textRenderer, distStr, x + width - mc.textRenderer.getWidth(distStr) - 5, ry, 0xFF9A9AB2, false);
+
+                int barX = x + 17;
+                int barY = ry + 9;
+                int barW = width - 22;
+                NeonButton.fillSmoothRounded(ctx, barX, barY, barW, 2, 1, 0xFF222232);
+                int fillW = Math.max(2, Math.round(barW * info.progress()));
+                NeonButton.fillGradientRounded(ctx, barX, barY, fillW, 2, 1, pCol, 0xFFFFFFFF);
+                ry += 14;
+            }
+        }
+
+        @Override protected int defaultX() { return 6; }
+        @Override protected int defaultY() { return 184; }
     }
 
     static class InventoryElement extends HudElement {
@@ -982,4 +1046,3 @@ public final class HudManager {
         @Override protected int defaultX() { return screenW() - 96; } @Override protected int defaultY() { return screenH() - 70; }
     }
 }
-// === КОНЕЦ ФАЙЛА ===
