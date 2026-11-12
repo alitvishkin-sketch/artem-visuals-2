@@ -19,8 +19,12 @@ import org.lwjgl.glfw.GLFW;
 public class ArtemVisualsClient implements ClientModInitializer {
     public static final String MOD_ID = "artemvisuals";
     private static KeyBinding openMenuKey;
+    private static KeyBinding zoomKey;
     private static boolean wasAttackPressed = false;
     private static boolean wasMouseDown = false;
+
+    private static float currentZoomMult = 1.0f;
+    private static float targetZoomLevel = 0.28f;
 
     @Override
     public void onInitializeClient() {
@@ -30,6 +34,12 @@ public class ArtemVisualsClient implements ClientModInitializer {
                 "key.artemvisuals.open_menu",
                 InputUtil.Type.KEYSYM,
                 GLFW.GLFW_KEY_RIGHT_SHIFT,
+                "key.categories.artemvisuals"));
+
+        zoomKey = KeyBindingHelper.registerKeyBinding(new KeyBinding(
+                "key.artemvisuals.zoom",
+                InputUtil.Type.KEYSYM,
+                GLFW.GLFW_KEY_C,
                 "key.categories.artemvisuals"));
 
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
@@ -52,6 +62,27 @@ public class ArtemVisualsClient implements ClientModInitializer {
 
         EffectManager.registerEvents();
         ClientLifecycleEvents.CLIENT_STARTED.register(Optimizer::applyLighting);
+    }
+
+    public static boolean isZooming() {
+        MinecraftClient mc = MinecraftClient.getInstance();
+        return mc != null && mc.currentScreen == null && zoomKey != null && zoomKey.isPressed();
+    }
+
+    public static double getZoomFovMultiplier() {
+        float goal = isZooming() ? targetZoomLevel : 1.0f;
+        currentZoomMult += (goal - currentZoomMult) * 0.22f;
+        if (!isZooming() && Math.abs(1.0f - currentZoomMult) < 0.005f) {
+            currentZoomMult = 1.0f;
+            targetZoomLevel = 0.28f;
+        }
+        return currentZoomMult;
+    }
+
+    public static boolean handleZoomScroll(double vertical) {
+        if (!isZooming()) return false;
+        targetZoomLevel = Math.max(0.10f, Math.min(0.65f, targetZoomLevel - (float) vertical * 0.04f));
+        return true;
     }
 
     private static void handleCpsAndHudDrag(MinecraftClient client) {
