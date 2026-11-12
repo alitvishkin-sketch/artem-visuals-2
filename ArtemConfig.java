@@ -4,137 +4,230 @@ import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import net.fabricmc.loader.api.FabricLoader;
 
-import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Base64;
 import java.util.HashMap;
 import java.util.Map;
 
 /**
- * Главный конфиг мода + позиции HUD + настройки прицела.
- * Профили хранятся отдельно через ProfileManager.
+ * Единая конфигурация ARTEM VISUALS 3.0 с поддержкой профилей, биндов, HUD-масштабов и импорта/экспорта.
  */
 public class ArtemConfig {
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
-    private static final Path PATH = FabricLoader.getInstance().getConfigDir().resolve("artemvisuals.json");
-    private static ArtemConfig instance;
+    private static final Path CONFIG_PATH = FabricLoader.getInstance().getConfigDir().resolve("artemvisuals.json");
+    private static ArtemConfig INSTANCE;
 
-    // ——— Общие ———
+    public static class HudPos {
+        public int x;
+        public int y;
+        public float scale = 1.0f;
+
+        public HudPos() {}
+
+        public HudPos(int x, int y) {
+            this.x = x;
+            this.y = y;
+            this.scale = 1.0f;
+        }
+    }
+
+    // Базовые настройки 2.0 (полная совместимость)
     public boolean masterEnabled = true;
-
-    // ——— Эффекты ———
     public boolean leafParticles = true;
     public boolean precipitationEffects = true;
     public boolean waterSparkles = true;
     public boolean fireflies = true;
     public boolean blockBreakEffects = true;
-    public boolean softLighting = false;
-    public boolean smoothLighting = true;
-    public int density = 1;          // 0 low / 1 med / 2 high
-    public int radius = 1;
-    public int lightingLevel = 1;
+    public boolean softLighting = true;
     public boolean adaptive = true;
-    public int adaptiveThreshold = 1;
+    public int density = 1;
+    public int radius = 1;
 
-    // ——— HUD ———
-    public boolean showFps = true;
-    public boolean showPing = true;
-    public boolean showXyz = true;
-    public boolean showCps = true;
-    public boolean showWasd = true;
-    public boolean showServer = true;
+    // HUD 2.0 + 3.0
     public boolean hudEditMode = false;
-    public Map<String, HudPos> hudPositions = new HashMap<>();
+    public boolean showServer = true;
+    public boolean showFps = false;
+    public boolean showPing = false;
+    public boolean showXyz = true;
+    public boolean showCps = false;
+    public boolean showWasd = false;
+    public boolean showKeystrokes = false;
+    public boolean showSpeed = false;
+    public boolean showDirection = false;
+    public boolean showNickname = false;
+    public boolean showPlaytime = false;
+    public boolean showArmor = true;
+    public boolean showHealthHud = false;
+    public boolean showHungerHud = false;
+    public boolean showPotions = true;
+    public boolean showTargetHud = true;
+    public boolean showHotKeys = true;
+    public boolean showArrayList = true;
+    public boolean showRadar = false;
+    public boolean showMinimap = false;
 
-    // ——— Прицел ———
+    // Прицел
     public boolean customCrosshair = true;
-    public int crosshairStyle = 0;   // 0=cross, 1=dot, 2=circle, 3=plus
-    public int crosshairColor = 0xFF9B59FF; // ARGB neon purple
-    public int crosshairSize = 6;
+    public int crosshairStyle = 0; // 0=Крест, 1=Точка, 2=Круг, 3=Плюс
+    public int crosshairSize = 4;
     public int crosshairGap = 2;
     public int crosshairThickness = 1;
+    public int crosshairColor = 0xFF00F5FF;
     public boolean crosshairOutline = true;
-    public boolean crosshairDynamic = false; // expand on attack
+    public boolean crosshairDynamic = true;
 
-    // ——— Оптимизация (бэкап) ———
-    public double originalGamma = -1;
-    public Backup backup;
+    // Visual 3.0
+    public boolean esp = false;
+    public int espStyle = 0; // 0=Полный бокс, 1=Углы, 2=Двойной контур
+    public int espColor = 0xFF6C5CE7;
+    public float espAlpha = 0.85f;
+    public boolean espPulse = true;
 
-    public static class Backup {
-        public int particles;
-        public double entityDistance;
-        public int biomeBlend;
-        public int mipmaps;
-        public int clouds;
-        public boolean shadows;
-    }
+    public boolean playerHighlight = true;
+    public int playerHighlightColor = 0xFF9D8DF7;
+    public float playerHighlightAlpha = 0.85f;
 
-    public static class HudPos {
-        public int x = 4;
-        public int y = 4;
-        public HudPos() {}
-        public HudPos(int x, int y) { this.x = x; this.y = y; }
-    }
+    public boolean tracers = false;
+    public int tracersColor = 0xFF6C5CE7;
+    public float tracersAlpha = 0.70f;
 
-    public double densityMul() { return new double[]{0.5, 1.0, 1.75}[clamp(density)]; }
-    public int radiusBlocks() { return new int[]{8, 12, 16}[clamp(radius)]; }
-    public double gammaLevel() { return new double[]{0.4, 0.6, 0.8}[clamp(lightingLevel)]; }
-    public int fpsThreshold() { return new int[]{20, 30, 45}[clamp(adaptiveThreshold)]; }
+    public boolean chams = false;
+    public int chamsColor = 0xFF6C5CE7;
+    public float chamsAlpha = 0.45f;
 
-    private static int clamp(int v) { return Math.max(0, Math.min(2, v)); }
+    public boolean nameTags = true;
+    public float nameTagsScale = 0.85f;
+    public boolean nameTagsHealth = true;
+    public boolean nameTagsDistance = true;
 
-    public HudPos getHudPos(String id, int defX, int defY) {
-        return hudPositions.computeIfAbsent(id, k -> new HudPos(defX, defY));
-    }
+    public boolean itemEsp = true;
+    public int itemEspColor = 0xFF00F5FF;
+    public boolean itemEspLabels = true;
+
+    public boolean mobEsp = false;
+    public int mobEspColor = 0xFFFFB703;
+
+    public boolean entityHighlight = false;
+    public int entityHighlightColor = 0xFFE056FD;
+
+    public boolean hitParticles = true;
+    public int hitParticlesCount = 14;
+    public int hitParticlesColor = 0xFF9D8DF7;
+
+    public boolean damageIndicator = true;
+    public float damageIndicatorSize = 0.90f;
+
+    public boolean nimb = true;
+    public int nimbColor = 0xFF6C5CE7;
+    public float nimbSize = 0.35f;
+
+    public boolean trails = true;
+    public int trailLength = 24;
+    public int trailColor = 0xFF6C5CE7;
+
+    public boolean targetEsp = true;
+    public int targetEspColor = 0xFF6C5CE7;
+    public float targetEspSpeed = 1.0f;
+
+    public boolean jumpCircle = true;
+    public float jumpCircleRadius = 1.2f;
+    public int jumpCircleColor = 0xFF6C5CE7;
+
+    public boolean blockOverlay = true;
+    public float blockOverlayAlpha = 0.85f;
+    public int blockOverlayColor = 0xFF6C5CE7;
+
+    public boolean renderTweaks = true;
+    public boolean motionBlur = false;
+    public boolean worldCustomizer = true;
+    public int worldTimeMode = 0; // 0=Сервер, 1=День, 2=Закат, 3=Ночь
+    public boolean skyTint = true;
+
+    // Тема, RGB, язык и FunTime
+    public int clientAccent = 0xFF6C5CE7;
+    public boolean rgbMode = false;
+    public float rgbSpeed = 1.0f;
+    public boolean autoFunTime = true;
+    public String language = "RU"; // "RU" или "EN"
+
+    public Map<String, HudPos> hudPositions = new HashMap<>();
+    public Map<String, Integer> keybinds = new HashMap<>();
 
     public static ArtemConfig get() {
-        if (instance == null) instance = load();
-        return instance;
+        if (INSTANCE == null) {
+            INSTANCE = load();
+        }
+        return INSTANCE;
+    }
+
+    public static void replaceInstance(ArtemConfig next) {
+        if (next != null) {
+            if (next.hudPositions == null) next.hudPositions = new HashMap<>();
+            if (next.keybinds == null) next.keybinds = new HashMap<>();
+            INSTANCE = next;
+            INSTANCE.save();
+        }
     }
 
     private static ArtemConfig load() {
         try {
-            if (Files.exists(PATH)) {
-                ArtemConfig c = GSON.fromJson(Files.readString(PATH), ArtemConfig.class);
-                if (c != null) {
-                    if (c.hudPositions == null) c.hudPositions = new HashMap<>();
-                    return c;
+            if (Files.exists(CONFIG_PATH)) {
+                String json = Files.readString(CONFIG_PATH, StandardCharsets.UTF_8);
+                ArtemConfig cfg = GSON.fromJson(json, ArtemConfig.class);
+                if (cfg != null) {
+                    if (cfg.hudPositions == null) cfg.hudPositions = new HashMap<>();
+                    if (cfg.keybinds == null) cfg.keybinds = new HashMap<>();
+                    return cfg;
                 }
             }
         } catch (Exception ignored) {
         }
-        ArtemConfig c = new ArtemConfig();
-        c.save();
-        return c;
+        ArtemConfig fresh = new ArtemConfig();
+        fresh.save();
+        return fresh;
     }
 
     public void save() {
         try {
-            Files.createDirectories(PATH.getParent());
-            Files.writeString(PATH, GSON.toJson(this));
-        } catch (IOException e) {
-            System.err.println("[ArtemVisuals] Не удалось сохранить конфиг: " + e);
+            Files.createDirectories(CONFIG_PATH.getParent());
+            Files.writeString(CONFIG_PATH, GSON.toJson(this), StandardCharsets.UTF_8);
+        } catch (Exception ignored) {
         }
     }
 
-    /** Сброс к значениям по умолчанию (без удаления бэкапа освещения). */
+    public String exportBase64() {
+        String json = GSON.toJson(this);
+        return "AV3:" + Base64.getEncoder().encodeToString(json.getBytes(StandardCharsets.UTF_8));
+    }
+
+    public boolean importBase64(String raw) {
+        if (raw == null || raw.isBlank()) return false;
+        try {
+            String trimmed = raw.trim();
+            String json = trimmed.startsWith("AV3:")
+                    ? new String(Base64.getDecoder().decode(trimmed.substring(4)), StandardCharsets.UTF_8)
+                    : trimmed;
+            ArtemConfig parsed = GSON.fromJson(json, ArtemConfig.class);
+            if (parsed == null) return false;
+            replaceInstance(parsed);
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
     public void resetDefaults() {
-        masterEnabled = true;
-        leafParticles = precipitationEffects = waterSparkles = fireflies = blockBreakEffects = true;
-        softLighting = false;
-        smoothLighting = true;
-        density = radius = lightingLevel = adaptiveThreshold = 1;
-        adaptive = true;
-        showFps = showPing = showXyz = showCps = showWasd = showServer = true;
-        hudEditMode = false;
-        customCrosshair = true;
-        crosshairStyle = 0;
-        crosshairColor = 0xFF9B59FF;
-        crosshairSize = 6;
-        crosshairGap = 2;
-        crosshairThickness = 1;
-        crosshairOutline = true;
-        crosshairDynamic = false;
-        save();
+        ArtemConfig fresh = new ArtemConfig();
+        replaceInstance(fresh);
+    }
+
+    public HudPos getHudPos(String id, int defaultX, int defaultY) {
+        return hudPositions.computeIfAbsent(id, k -> new HudPos(defaultX, defaultY));
+    }
+
+    public int fpsThreshold() {
+        return 45;
     }
 }
