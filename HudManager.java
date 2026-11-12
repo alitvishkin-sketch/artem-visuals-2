@@ -18,7 +18,7 @@ import java.util.Collection;
 import java.util.List;
 
 /**
- * HUD для FunTime: верхний инфо-бар, Potions HUD, TargetHUD со скином цели, WASD.
+ * HUD для FunTime в стиле PulseVisuals: верхний инфо-бар, Potions HUD, TargetHUD со скином цели, WASD.
  */
 public final class HudManager {
     public static boolean showPotions = true;
@@ -122,7 +122,7 @@ public final class HudManager {
             return p < 60 ? 0xFFF2F2FA : (p < 130 ? 0xFF9D8DF7 : 0xFFFF5E7E);
         }
         @Override protected int defaultX() { return 6; }
-        @Override protected int defaultY() { return 22; }
+        @Override protected int defaultY() { return 23; }
     }
 
     static class XyzElement extends HudElement {
@@ -135,7 +135,7 @@ public final class HudManager {
         }
         @Override public int getColor(MinecraftClient mc) { return 0xFFE4E4F0; }
         @Override protected int defaultX() { return 6; }
-        @Override protected int defaultY() { return 38; }
+        @Override protected int defaultY() { return 40; }
     }
 
     static class CpsElement extends HudElement {
@@ -144,7 +144,7 @@ public final class HudManager {
         @Override public String getText(MinecraftClient mc) { return "CPS " + currentCps(); }
         @Override public int getColor(MinecraftClient mc) { return 0xFF9D8DF7; }
         @Override protected int defaultX() { return 6; }
-        @Override protected int defaultY() { return 54; }
+        @Override protected int defaultY() { return 57; }
     }
 
     static class WasdElement extends HudElement {
@@ -177,15 +177,18 @@ public final class HudManager {
         }
 
         private void drawKey(DrawContext ctx, MinecraftClient mc, int kx, int ky, int size, String label, boolean pressed) {
-            int bg = pressed ? 0xE66C5CE7 : 0xCC101018;
-            int border = pressed ? 0x66B8A9FF : 0x22FFFFFF;
-            int textCol = pressed ? 0xFFFFFFFF : 0xFF9696AC;
-
-            NeonButton.fillRounded(ctx, kx, ky, size, size, bg);
-            NeonButton.drawRoundedBorder(ctx, kx, ky, size, size, border);
+            if (pressed) {
+                NeonButton.drawAmbientGlow(ctx, kx, ky, size, size, 4, 0xFF6C5CE7, 1);
+                NeonButton.fillGradientRounded(ctx, kx, ky, size, size, 4, 0xF08B78FF, 0xF06C5CE7);
+                NeonButton.drawSmoothRoundedOutline(ctx, kx, ky, size, size, 4, 0x88FFFFFF);
+            } else {
+                NeonButton.fillGradientRounded(ctx, kx, ky, size, size, 4, 0xD412121C, 0xD40B0B12);
+                NeonButton.drawSmoothRoundedOutline(ctx, kx, ky, size, size, 4, 0x22FFFFFF);
+            }
 
             int tw = mc.textRenderer.getWidth(label);
-            ctx.drawText(mc.textRenderer, label, kx + (size - tw) / 2, ky + (size - 8) / 2 + 1, textCol, pressed);
+            ctx.drawText(mc.textRenderer, label, kx + (size - tw) / 2, ky + (size - 8) / 2 + 1,
+                    pressed ? 0xFFFFFFFF : 0xFF9696AC, pressed);
         }
 
         @Override protected int defaultX() { return 6; }
@@ -197,6 +200,9 @@ public final class HudManager {
         }
     }
 
+    /**
+     * Верхняя центральная пилюля в стиле PulseVisuals: пульс + FunTime + пинг + FPS.
+     */
     static class TopBarElement extends HudElement {
         TopBarElement() { super("server"); }
         @Override public boolean isEnabled(ArtemConfig c) { return c.showServer; }
@@ -230,39 +236,40 @@ public final class HudManager {
             String srv = getText(mc);
             String ping = buildPing(mc);
             String fps = buildFps(mc);
-            width = 18 + mc.textRenderer.getWidth(srv) + 10
+            width = 20 + mc.textRenderer.getWidth(srv) + 10
                     + mc.textRenderer.getWidth(ping) + 10
-                    + mc.textRenderer.getWidth(fps) + 8;
-            height = 15;
+                    + mc.textRenderer.getWidth(fps) + 9;
+            height = 16;
         }
 
         @Override
         protected void renderBody(DrawContext ctx, MinecraftClient mc, ArtemConfig c, int x, int y) {
-            NeonButton.fillRounded(ctx, x, y, width, height, 0xD8101018);
-            NeonButton.drawRoundedBorder(ctx, x, y, width, height, 0x28FFFFFF);
+            NeonButton.drawAmbientGlow(ctx, x, y, width, height, 6, 0xFF6C5CE7, 1);
+            NeonButton.fillGradientRounded(ctx, x, y, width, height, 6, 0xE613131E, 0xE60B0B13);
+            NeonButton.drawSmoothRoundedOutline(ctx, x, y, width, height, 6, 0x2EFFFFFF);
 
-            int wx = x + 5;
-            int wy = y + 3;
+            int wx = x + 6;
+            int wy = y + 4;
             ctx.fill(wx, wy + 4, wx + 3, wy + 5, 0xFF7B68EE);
-            ctx.fill(wx + 3, wy + 1, wx + 4, wy + 6, 0xFF9D8DF7);
+            ctx.fill(wx + 3, wy + 1, wx + 4, wy + 6, 0xFFB8A9FF);
             ctx.fill(wx + 4, wy + 3, wx + 5, wy + 7, 0xFF7B68EE);
             ctx.fill(wx + 5, wy + 4, wx + 8, wy + 5, 0xFF7B68EE);
 
-            int cx = x + 16;
+            int cx = x + 18;
             int ty = y + 4;
 
             String srv = getText(mc);
-            ctx.drawText(mc.textRenderer, srv, cx, ty, 0xFFF2F2FA, false);
-            cx += mc.textRenderer.getWidth(srv) + 4;
+            ctx.drawText(mc.textRenderer, srv, cx, ty, 0xFFF4F4FC, false);
+            cx += mc.textRenderer.getWidth(srv) + 5;
 
-            ctx.fill(cx, y + 3, cx + 1, y + height - 3, 0x33FFFFFF);
+            ctx.fill(cx, y + 4, cx + 1, y + height - 4, 0x2EFFFFFF);
             cx += 5;
 
             String ping = buildPing(mc);
             ctx.drawText(mc.textRenderer, ping, cx, ty, 0xFFB8A9FF, false);
-            cx += mc.textRenderer.getWidth(ping) + 4;
+            cx += mc.textRenderer.getWidth(ping) + 5;
 
-            ctx.fill(cx, y + 3, cx + 1, y + height - 3, 0x33FFFFFF);
+            ctx.fill(cx, y + 4, cx + 1, y + height - 4, 0x2EFFFFFF);
             cx += 5;
 
             String fps = buildFps(mc);
@@ -280,6 +287,9 @@ public final class HudManager {
         @Override protected int defaultY() { return 5; }
     }
 
+    /**
+     * Карточка активных зелий слева в стиле PulseVisuals.
+     */
     static class PotionsElement extends HudElement {
         PotionsElement() { super("potions"); }
         @Override public boolean isEnabled(ArtemConfig c) { return showPotions; }
@@ -323,13 +333,13 @@ public final class HudManager {
                 height = 0;
                 return;
             }
-            int maxW = 86;
+            int maxW = 92;
             for (String[] r : rows) {
-                int w = 14 + mc.textRenderer.getWidth(r[0]) + 10 + mc.textRenderer.getWidth(r[1]) + 6;
+                int w = 16 + mc.textRenderer.getWidth(r[0]) + 12 + mc.textRenderer.getWidth(r[1]) + 7;
                 if (w > maxW) maxW = w;
             }
             width = maxW;
-            height = 16 + rows.size() * 12;
+            height = 18 + rows.size() * 12;
         }
 
         @Override
@@ -337,30 +347,31 @@ public final class HudManager {
             List<String[]> rows = collectRows(mc, c);
             if (rows.isEmpty()) return;
 
-            NeonButton.fillRounded(ctx, x, y, width, height, 0xCC101018);
-            NeonButton.drawRoundedBorder(ctx, x, y, width, height, 0x22FFFFFF);
+            NeonButton.fillGradientRounded(ctx, x, y, width, height, 6, 0xDC13131E, 0xDC0B0B13);
+            NeonButton.drawSmoothRoundedOutline(ctx, x, y, width, height, 6, 0x26FFFFFF);
 
-            ctx.fill(x + 6, y + 4, x + 9, y + 5, 0xFF9D8DF7);
-            ctx.fill(x + 5, y + 5, x + 10, y + 10, 0xFF7B68EE);
-            ctx.drawText(mc.textRenderer, "Potions", x + 13, y + 4, 0xFFD8D8E6, false);
+            // Иконка зелья + заголовок
+            ctx.fill(x + 7, y + 4, x + 10, y + 5, 0xFFB8A9FF);
+            NeonButton.fillSmoothRounded(ctx, x + 6, y + 5, 5, 6, 2, 0xFF7B68EE);
+            ctx.drawText(mc.textRenderer, "Potions", x + 14, y + 4, 0xFFE2E2F0, false);
 
-            int ry = y + 16;
+            int ry = y + 17;
             for (String[] r : rows) {
                 int dotCol = Integer.parseInt(r[2]);
-                ctx.fill(x + 6, ry + 2, x + 9, ry + 6, dotCol);
-                ctx.drawText(mc.textRenderer, r[0], x + 13, ry, 0xFFE6E6F2, false);
+                NeonButton.drawCircle(ctx, x + 8, ry + 4, 2, dotCol);
+                ctx.drawText(mc.textRenderer, r[0], x + 14, ry, 0xFFE6E6F2, false);
                 int tw = mc.textRenderer.getWidth(r[1]);
-                ctx.drawText(mc.textRenderer, r[1], x + width - tw - 6, ry, 0xFF9696AC, false);
+                ctx.drawText(mc.textRenderer, r[1], x + width - tw - 7, ry, 0xFF9696AC, false);
                 ry += 12;
             }
         }
 
         @Override protected int defaultX() { return 6; }
-        @Override protected int defaultY() { return 74; }
+        @Override protected int defaultY() { return 76; }
     }
 
     /**
-     * TargetHUD в стиле PulseVisuals с рендером головы скина игрока, HP и фиолетовой полосой.
+     * TargetHUD в стиле PulseVisuals: голова скина, ник, HP + Absorption и градиентная полоса здоровья.
      */
     static class TargetHudElement extends HudElement {
         private float smoothHp = 20f;
@@ -394,8 +405,8 @@ public final class HudManager {
                 height = 0;
                 return;
             }
-            width = 118;
-            height = 28;
+            width = 124;
+            height = 30;
         }
 
         @Override
@@ -410,42 +421,44 @@ public final class HudManager {
             smoothHp += (hp - smoothHp) * 0.25f;
             float ratio = Math.min(1f, Math.max(0f, smoothHp / maxHp));
 
-            NeonButton.fillRounded(ctx, x, y, width, height, 0xD8101018);
-            NeonButton.drawRoundedBorder(ctx, x, y, width, height, 0x28FFFFFF);
+            NeonButton.drawAmbientGlow(ctx, x, y, width, height, 6, 0xFF6C5CE7, 1);
+            NeonButton.fillGradientRounded(ctx, x, y, width, height, 6, 0xE613131E, 0xE60B0B13);
+            NeonButton.drawSmoothRoundedOutline(ctx, x, y, width, height, 6, 0x33FFFFFF);
 
-            int avSize = 20;
+            int avSize = 22;
             int ax = x + 4;
             int ay = y + 4;
-            NeonButton.fillRounded(ctx, ax, ay, avSize, avSize, 0xFF1C1B2E);
+            NeonButton.fillSmoothRounded(ctx, ax, ay, avSize, avSize, 4, 0xFF1C1B2E);
 
             String name = target.getName().getString();
             if (target instanceof AbstractClientPlayerEntity player) {
                 PlayerSkinDrawer.draw(ctx, player.getSkinTextures().texture(), ax + 1, ay + 1, avSize - 2);
             } else {
                 String initial = name.isEmpty() ? "?" : name.substring(0, 1).toUpperCase();
-                ctx.drawCenteredTextWithShadow(mc.textRenderer, initial, ax + avSize / 2, ay + 6, 0xFFB8A9FF);
+                ctx.drawCenteredTextWithShadow(mc.textRenderer, initial, ax + avSize / 2, ay + 7, 0xFFB8A9FF);
             }
-            NeonButton.drawRoundedBorder(ctx, ax, ay, avSize, avSize, 0x447B68EE);
+            NeonButton.drawSmoothRoundedOutline(ctx, ax, ay, avSize, avSize, 4, 0x558B78FF);
 
-            if (name.length() > 13) name = name.substring(0, 12) + "…";
-            int tx = ax + avSize + 5;
-            ctx.drawText(mc.textRenderer, name, tx, y + 4, 0xFFF2F2FA, false);
+            if (name.length() > 14) name = name.substring(0, 13) + "…";
+            int tx = ax + avSize + 6;
+            ctx.drawText(mc.textRenderer, name, tx, y + 4, 0xFFF4F4FC, false);
 
             String hpStr = String.format("HP %.1f", hp);
-            ctx.drawText(mc.textRenderer, hpStr, tx, y + 13, 0xFF9696AC, false);
+            ctx.drawText(mc.textRenderer, hpStr, tx, y + 14, 0xFF9696AC, false);
             if (abs > 0.1f) {
                 String absStr = String.format("+%.0f", abs);
-                ctx.drawText(mc.textRenderer, absStr, tx + mc.textRenderer.getWidth(hpStr) + 3, y + 13, 0xFFFFD166, false);
+                ctx.drawText(mc.textRenderer, absStr, tx + mc.textRenderer.getWidth(hpStr) + 3, y + 14, 0xFFFFD166, false);
             }
 
+            // Градиентная скруглённая полоса здоровья
             int barX = tx;
-            int barY = y + 22;
-            int barW = width - (tx - x) - 5;
+            int barY = y + 23;
+            int barW = width - (tx - x) - 6;
             int barH = 3;
-            ctx.fill(barX, barY, barX + barW, barY + barH, 0xFF232234);
+            NeonButton.fillSmoothRounded(ctx, barX, barY, barW, barH, 1, 0xFF232234);
             int fillW = Math.round(barW * ratio);
-            if (fillW > 0) {
-                ctx.fillGradient(barX, barY, barX + fillW, barY + barH, 0xFF6C5CE7, 0xFF9D8DF7);
+            if (fillW > 1) {
+                NeonButton.fillGradientRounded(ctx, barX, barY, fillW, barH, 1, 0xFF6C5CE7, 0xFFB8A9FF);
             }
         }
 
@@ -453,9 +466,9 @@ public final class HudManager {
         protected int defaultX() {
             MinecraftClient mc = MinecraftClient.getInstance();
             if (mc == null || mc.getWindow() == null) return 150;
-            return (mc.getWindow().getScaledWidth() - 118) / 2;
+            return (mc.getWindow().getScaledWidth() - 124) / 2;
         }
 
-        @Override protected int defaultY() { return 24; }
+        @Override protected int defaultY() { return 25; }
     }
 }
