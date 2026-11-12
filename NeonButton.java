@@ -16,9 +16,6 @@ import java.util.function.IntConsumer;
 import java.util.function.IntSupplier;
 import java.util.function.Supplier;
 
-/**
- * UI-компоненты в стиле PulseVisual: чёткая типографика 1.0f, плавные пилюли-тумблеры и кастомизация цвета окна.
- */
 public class NeonButton extends ClickableWidget {
     public enum Style {
         TOGGLE,
@@ -58,8 +55,14 @@ public class NeonButton extends ClickableWidget {
     public static int CARD_OFF = 0xCC13131C;
     public static int CARD_ON = 0xE6181824;
 
+    // Отдельные цвета для HUD
+    public static int HUD_ACCENT = 0xFF7B68EE;
+    public static int HUD_ACCENT_BRIGHT = 0xFFA495FF;
+    public static int HUD_BG_TOP = 0xE0101018;
+    public static int HUD_BG_BOTTOM = 0xE00A0A10;
+
     public static final int TEXT = 0xFFE8E8F4;
-    public static final int TEXT_DIM = 0xFF606076;
+    public static final int TEXT_DIM = 0xFF6A6A82;
     public static final int TEXT_ON = 0xFFFFFFFF;
 
     public NeonButton(int x, int y, int w, int h, Supplier<String> label, BooleanSupplier state, Runnable action) {
@@ -81,17 +84,41 @@ public class NeonButton extends ClickableWidget {
 
     public static void syncTheme() {
         ArtemConfig c = ArtemConfig.get();
+
+        // 1. Тема меню
         if (c.rgbMode) {
             float hue = ((System.currentTimeMillis() % 4500L) / 4500f * c.rgbSpeed) % 1.0f;
-            int rgb = Color.HSBtoRGB(hue, 0.68f, 0.96f);
+            int rgb = Color.HSBtoRGB(hue, 0.70f, 0.96f);
             setClientAccent(0xFF000000 | (rgb & 0x00FFFFFF));
         } else if (c.useCustomHue) {
-            int rgb = Color.HSBtoRGB(c.customHue, 0.68f, 0.96f);
+            int rgb = Color.HSBtoRGB(c.customHue, 0.70f, 0.96f);
             setClientAccent(0xFF000000 | (rgb & 0x00FFFFFF));
         } else {
             setClientAccent(c.clientAccent);
         }
 
+        // 2. Цвет HUD (независимый и всегда актуальный)
+        int hudBase;
+        if (c.hudRainbow) {
+            float hue = ((System.currentTimeMillis() % 4200L) / 4200f * Math.max(0.3f, c.rgbSpeed)) % 1.0f;
+            hudBase = 0xFF000000 | (Color.HSBtoRGB(hue, 0.74f, 0.98f) & 0x00FFFFFF);
+        } else if (c.hudUseCustomHue) {
+            hudBase = 0xFF000000 | (Color.HSBtoRGB(c.hudHue, 0.74f, 0.98f) & 0x00FFFFFF);
+        } else {
+            hudBase = 0xFF000000 | (c.hudAccentColor & 0x00FFFFFF);
+        }
+        HUD_ACCENT = hudBase;
+        HUD_ACCENT_BRIGHT = brighten(hudBase, 44);
+
+        int hBg = c.hudBgColor & 0x00FFFFFF;
+        int hAlpha = Math.max(110, Math.min(248, Math.round(c.hudBgAlpha * 255f)));
+        int hr1 = Math.min(255, ((hBg >> 16) & 0xFF) + 5);
+        int hg1 = Math.min(255, ((hBg >> 8) & 0xFF) + 5);
+        int hb1 = Math.min(255, (hBg & 0xFF) + 8);
+        HUD_BG_TOP = (hAlpha << 24) | (hr1 << 16) | (hg1 << 8) | hb1;
+        HUD_BG_BOTTOM = (hAlpha << 24) | hBg;
+
+        // 3. Фон окна меню
         int base = c.windowBgColor & 0x00FFFFFF;
         int alpha = Math.max(140, Math.min(252, Math.round(c.windowAlpha * 255f)));
         int r1 = Math.min(255, ((base >> 16) & 0xFF) + 4);
@@ -111,6 +138,23 @@ public class NeonButton extends ClickableWidget {
         CARD_ON = (Math.min(250, alpha) << 24) | (onR << 16) | (onG << 8) | onB;
     }
 
+    public static int getHudAccent(int offsetMs) {
+        ArtemConfig c = ArtemConfig.get();
+        if (c.hudRainbow) {
+            float hue = (((System.currentTimeMillis() + offsetMs) % 4200L) / 4200f * Math.max(0.3f, c.rgbSpeed)) % 1.0f;
+            return 0xFF000000 | (Color.HSBtoRGB(hue, 0.74f, 0.98f) & 0x00FFFFFF);
+        }
+        return HUD_ACCENT;
+    }
+
+    public static int getHudAccentBright(int offsetMs) {
+        ArtemConfig c = ArtemConfig.get();
+        if (c.hudRainbow) {
+            return brighten(getHudAccent(offsetMs), 40);
+        }
+        return HUD_ACCENT_BRIGHT;
+    }
+
     public static int getDynamicColor(int baseColor, int offsetMs) {
         ArtemConfig c = ArtemConfig.get();
         if (c.rgbMode) {
@@ -125,11 +169,15 @@ public class NeonButton extends ClickableWidget {
     }
 
     public static void setClientAccent(int primary) {
-        ACCENT = primary;
-        int r = Math.min(255, ((primary >> 16) & 0xFF) + 42);
-        int g = Math.min(255, ((primary >> 8) & 0xFF) + 42);
-        int b = Math.min(255, (primary & 0xFF) + 42);
-        ACCENT_BRIGHT = 0xFF000000 | (r << 16) | (g << 8) | b;
+        ACCENT = 0xFF000000 | (primary & 0x00FFFFFF);
+        ACCENT_BRIGHT = brighten(ACCENT, 42);
+    }
+
+    private static int brighten(int argb, int add) {
+        int r = Math.min(255, ((argb >> 16) & 0xFF) + add);
+        int g = Math.min(255, ((argb >> 8) & 0xFF) + add);
+        int b = Math.min(255, (argb & 0xFF) + add);
+        return 0xFF000000 | (r << 16) | (g << 8) | b;
     }
 
     public static NeonButton slider(int x, int y, int w, int h, String title,
@@ -190,12 +238,12 @@ public class NeonButton extends ClickableWidget {
         if (style == Style.DOCK_ICON) {
             boolean active = state != null && state.getAsBoolean();
             if (active) {
-                drawAmbientGlow(ctx, x, y, w, h, 6, ACCENT, 2);
-                fillGradientRounded(ctx, x, y, w, h, 6, ACCENT_BRIGHT, ACCENT);
-                drawSmoothRoundedOutline(ctx, x, y, w, h, 6, 0x55FFFFFF);
+                drawAmbientGlow(ctx, x, y, w, h, 5, ACCENT, 2);
+                fillGradientRounded(ctx, x, y, w, h, 5, ACCENT_BRIGHT, ACCENT);
+                drawSmoothRoundedOutline(ctx, x, y, w, h, 5, 0x55FFFFFF);
             } else {
                 int bg = hover ? 0x24FFFFFF : 0x10FFFFFF;
-                fillSmoothRounded(ctx, x, y, w, h, 6, bg);
+                fillSmoothRounded(ctx, x, y, w, h, 5, bg);
             }
             drawDockGlyph(ctx, x + w / 2, y + h / 2, iconIndex, active ? 0xFFFFFFFF : (hover ? 0xFFD4D4E8 : 0xFF6C6C84));
             return;
@@ -208,12 +256,12 @@ public class NeonButton extends ClickableWidget {
                     ? Math.round(ratio * 360) + "°"
                     : (sliderInteger ? String.valueOf((int) Math.round(val)) : String.format("%.2f", val));
 
-            ctx.drawText(tr, rawText, x + 1, y + 1, hover || draggingSlider ? TEXT_ON : TEXT, false);
-            int vw = tr.getWidth(valStr);
-            ctx.drawText(tr, valStr, x + w - vw - 1, y + 1, ACCENT_BRIGHT, false);
+            drawSmallText(ctx, tr, rawText, x + 1, y + 1, hover || draggingSlider ? TEXT_ON : TEXT, 0.85f);
+            int vw = Math.round(tr.getWidth(valStr) * 0.85f);
+            drawSmallText(ctx, tr, valStr, x + w - vw - 1, y + 1, ACCENT_BRIGHT, 0.85f);
 
             int barX = x + 1;
-            int barY = y + h - 5;
+            int barY = y + h - 4;
             int barW = w - 2;
             int barH = 3;
 
@@ -235,19 +283,19 @@ public class NeonButton extends ClickableWidget {
 
             int kx = barX + (int) Math.round(barW * ratio);
             int ky = barY + 1;
-            drawCircle(ctx, kx, ky, 4, (ACCENT & 0x00FFFFFF) | 0x55000000);
-            drawCircle(ctx, kx, ky, 3, 0xFFFFFFFF);
+            drawCircle(ctx, kx, ky, 3, (ACCENT & 0x00FFFFFF) | 0x66000000);
+            drawCircle(ctx, kx, ky, 2, 0xFFFFFFFF);
             return;
         }
 
         if (style == Style.COLOR_SWATCHES && swatchPalette != null) {
-            ctx.drawText(tr, rawText, x + 1, y + 3, TEXT, false);
+            drawSmallText(ctx, tr, rawText, x + 1, y + 3, TEXT, 0.85f);
             int current = swatchGet != null ? swatchGet.getAsInt() : swatchPalette[0];
             int count = swatchPalette.length;
-            int r = 5;
-            int spacing = 13;
+            int r = 4;
+            int spacing = 11;
             int startX = x + w - (count - 1) * spacing - r - 2;
-            int cy = y + 7;
+            int cy = y + h / 2;
             for (int col : swatchPalette) {
                 int fullCol = 0xFF000000 | (col & 0x00FFFFFF);
                 if ((col & 0x00FFFFFF) == (current & 0x00FFFFFF)) {
@@ -264,55 +312,52 @@ public class NeonButton extends ClickableWidget {
         boolean on = isToggle && state.getAsBoolean();
 
         if (isToggle) {
-            // Карточка модуля в стиле PulseVisual
             if (on) {
-                fillSmoothRounded(ctx, x, y, w, h, 6, hover ? lighten(CARD_ON, 6) : CARD_ON);
-                drawSmoothRoundedOutline(ctx, x, y, w, h, 6,
+                fillSmoothRounded(ctx, x, y, w, h, 5, hover ? lighten(CARD_ON, 6) : CARD_ON);
+                drawSmoothRoundedOutline(ctx, x, y, w, h, 5,
                         hover ? ((ACCENT_BRIGHT & 0x00FFFFFF) | 0x55000000) : ((ACCENT & 0x00FFFFFF) | 0x28000000));
             } else {
-                fillSmoothRounded(ctx, x, y, w, h, 6, hover ? lighten(CARD_OFF, 5) : CARD_OFF);
-                drawSmoothRoundedOutline(ctx, x, y, w, h, 6, hover ? 0x1EFFFFFF : 0x0EFFFFFF);
+                fillSmoothRounded(ctx, x, y, w, h, 5, hover ? lighten(CARD_OFF, 5) : CARD_OFF);
+                drawSmoothRoundedOutline(ctx, x, y, w, h, 5, hover ? 0x1EFFFFFF : 0x0EFFFFFF);
             }
 
             if (toggleAnim < 0f) toggleAnim = on ? 1f : 0f;
             toggleAnim += ((on ? 1f : 0f) - toggleAnim) * 0.30f;
 
-            // Чёткий нативный текст 1.0f как в PulseVisual
-            int labelCol = on ? TEXT_ON : (hover ? 0xFF8C8CA4 : TEXT_DIM);
-            ctx.drawText(tr, rawText, x + 10, y + (h - 8) / 2, labelCol, false);
+            int labelCol = on ? TEXT_ON : (hover ? 0xFF9C9CB4 : TEXT_DIM);
+            drawSmallText(ctx, tr, rawText, x + 7, y + (h - 7) / 2f, labelCol, 0.88f);
 
-            // Плавный тумблер-пилюля справа
-            int tw = 24;
-            int th = 12;
-            int tx = x + w - tw - 8;
+            int tw = 20;
+            int th = 10;
+            int tx = x + w - tw - 6;
             int ty = y + (h - th) / 2;
 
             if (on) {
-                drawAmbientGlow(ctx, tx, ty, tw, th, 6, ACCENT, 2);
-                fillGradientRounded(ctx, tx, ty, tw, th, 6, ACCENT, ACCENT_BRIGHT);
+                fillGradientRounded(ctx, tx, ty, tw, th, 5, ACCENT, ACCENT_BRIGHT);
             } else {
-                fillSmoothRounded(ctx, tx, ty, tw, th, 6, 0xFF1E1E2B);
-                drawSmoothRoundedOutline(ctx, tx, ty, tw, th, 6, 0x16FFFFFF);
+                fillSmoothRounded(ctx, tx, ty, tw, th, 5, 0xFF1E1E2B);
+                drawSmoothRoundedOutline(ctx, tx, ty, tw, th, 5, 0x16FFFFFF);
             }
 
-            int travel = tw - 12;
-            int kcx = tx + 6 + Math.round(travel * toggleAnim);
+            int travel = tw - 10;
+            int kcx = tx + 5 + Math.round(travel * toggleAnim);
             int kcy = ty + th / 2;
-            drawCircle(ctx, kcx, kcy, 4, on ? 0xFFFFFFFF : 0xFF6B6B82);
+            drawCircle(ctx, kcx, kcy, 3, on ? 0xFFFFFFFF : 0xFF6B6B82);
         } else {
-            fillSmoothRounded(ctx, x, y, w, h, 6, hover ? lighten(CARD_ON, 6) : CARD_OFF);
-            drawSmoothRoundedOutline(ctx, x, y, w, h, 6,
+            fillSmoothRounded(ctx, x, y, w, h, 5, hover ? lighten(CARD_ON, 6) : CARD_OFF);
+            drawSmoothRoundedOutline(ctx, x, y, w, h, 5,
                     hover ? ((ACCENT_BRIGHT & 0x00FFFFFF) | 0x55000000) : 0x18FFFFFF);
 
             int colonIdx = rawText.indexOf(':');
             if (colonIdx > 0 && colonIdx < rawText.length() - 1) {
                 String k = rawText.substring(0, colonIdx + 1);
                 String v = rawText.substring(colonIdx + 1).trim();
-                ctx.drawText(tr, k, x + 9, y + (h - 8) / 2, 0xFF9A9AB2, false);
-                int vw = tr.getWidth(v);
-                ctx.drawText(tr, v, x + w - vw - 9, y + (h - 8) / 2, ACCENT_BRIGHT, false);
+                drawSmallText(ctx, tr, k, x + 7, y + (h - 7) / 2f, 0xFF9A9AB2, 0.88f);
+                int vw = Math.round(tr.getWidth(v) * 0.88f);
+                drawSmallText(ctx, tr, v, x + w - vw - 7, y + (h - 7) / 2f, ACCENT_BRIGHT, 0.88f);
             } else {
-                ctx.drawCenteredTextWithShadow(tr, rawText, x + w / 2, y + (h - 8) / 2, hover ? TEXT_ON : TEXT);
+                int tw = Math.round(tr.getWidth(rawText) * 0.88f);
+                drawSmallText(ctx, tr, rawText, x + (w - tw) / 2f, y + (h - 7) / 2f, hover ? TEXT_ON : TEXT, 0.88f);
             }
         }
     }
@@ -339,16 +384,14 @@ public class NeonButton extends ClickableWidget {
                 fillSmoothRounded(ctx, cx + 1, cy + 1, 3, 3, 1, col);
             }
             case 2 -> {
-                ctx.fill(cx, cy - 4, cx + 1, cy - 1, col);
-                ctx.fill(cx, cy + 2, cx + 1, cy + 5, col);
-                ctx.fill(cx - 4, cy, cx - 1, cy + 1, col);
-                ctx.fill(cx + 2, cy, cx + 5, cy + 1, col);
-                ctx.fill(cx, cy, cx + 1, cy + 1, col);
-            }
-            case 3 -> {
-                ctx.fill(cx, cy - 4, cx + 2, cy, col);
-                ctx.fill(cx - 3, cy - 1, cx + 4, cy + 1, col);
-                ctx.fill(cx - 1, cy, cx + 1, cy + 4, col);
+                // Иконка меча
+                ctx.fill(cx + 2, cy - 4, cx + 4, cy - 2, col);
+                ctx.fill(cx + 1, cy - 3, cx + 3, cy - 1, col);
+                ctx.fill(cx, cy - 2, cx + 2, cy, col);
+                ctx.fill(cx - 1, cy - 1, cx + 1, cy + 1, col);
+                ctx.fill(cx - 3, cy, cx + 1, cy + 1, col);
+                ctx.fill(cx - 1, cy, cx, cy + 3, col);
+                ctx.fill(cx - 3, cy + 2, cx - 1, cy + 4, col);
             }
             default -> {
                 fillSmoothRounded(ctx, cx - 4, cy - 3, 4, 2, 1, col);
@@ -382,11 +425,11 @@ public class NeonButton extends ClickableWidget {
         }
         if (style == Style.COLOR_SWATCHES && button == 0 && swatchPalette != null && swatchSet != null) {
             int count = swatchPalette.length;
-            int r = 5;
-            int spacing = 13;
+            int r = 4;
+            int spacing = 11;
             int startX = getX() + width - (count - 1) * spacing - r - 2;
             for (int col : swatchPalette) {
-                if (Math.abs(mouseX - startX) <= 6) {
+                if (Math.abs(mouseX - startX) <= 5) {
                     swatchSet.accept(col);
                     playDownSound(MinecraftClient.getInstance().getSoundManager());
                     return true;
