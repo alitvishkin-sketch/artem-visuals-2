@@ -1,1 +1,14 @@
-
+{
+  "required": true,
+  "package": "com.artem.visuals.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "client": [
+    "HeldItemRendererMixin",
+    "GameRendererMixin",
+    "InGameOverlayRendererMixin",
+    "MouseMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}
