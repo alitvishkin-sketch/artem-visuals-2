@@ -7,8 +7,10 @@ import net.fabricmc.loader.api.FabricLoader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.Base64;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 public class ArtemConfig {
@@ -30,7 +32,27 @@ public class ArtemConfig {
         }
     }
 
-    public int configVersion = 33;
+    public static class Waypoint {
+        public String name;
+        public int x;
+        public int y;
+        public int z;
+        public int color;
+        public boolean enabled = true;
+
+        public Waypoint() {}
+
+        public Waypoint(String name, int x, int y, int z, int color) {
+            this.name = name;
+            this.x = x;
+            this.y = y;
+            this.z = z;
+            this.color = color;
+            this.enabled = true;
+        }
+    }
+
+    public int configVersion = 34;
 
     // Базовые настройки
     public boolean masterEnabled = true;
@@ -44,7 +66,7 @@ public class ArtemConfig {
     public int density = 1;
     public int radius = 1;
 
-    // HUD и масштабирование (стиль Andromeda Visuals)
+    // HUD и масштабирование
     public boolean hudEditMode = false;
     public float hudScale = 0.80f;
     public float guiScale = 0.92f;
@@ -57,6 +79,7 @@ public class ArtemConfig {
     public boolean showTargetHud = true;
     public boolean showArmor = true;
     public boolean armorDurabilityPercent = false;
+    public boolean showCooldowns = true;
 
     public boolean showArrayList = false;
     public boolean showFps = false;
@@ -74,7 +97,7 @@ public class ArtemConfig {
     public boolean showRadar = false;
     public boolean showMinimap = false;
 
-    // Цвета HUD (мягкое тёмное стекло Andromeda)
+    // Цвета HUD
     public int hudAccentColor = 0xFF8A7CFF;
     public float hudHue = 0.70f;
     public boolean hudUseCustomHue = false;
@@ -82,7 +105,36 @@ public class ArtemConfig {
     public int hudBgColor = 0x101018;
     public float hudBgAlpha = 0.84f;
 
-    // Маленький меч и улучшения камеры/боя
+    // Хелперы
+    public boolean autoSprint = true;
+    public boolean lowArmorAlert = true;
+    public int lowArmorThreshold = 20;
+    public boolean potionExpiryAlert = true;
+    public boolean deathCoords = true;
+    public boolean autoDeathWaypoint = true;
+
+    // Аукцион (Помощник)
+    public boolean ahUnitPrice = true;
+    public boolean ahAutoRelist = false;
+    public int ahRelistInterval = 60;
+    public boolean ahSearchHandItem = true;
+    public int ahSearchKeyCode = 72; // Клавиша H
+
+    // Друзья
+    public boolean highlightFriends = true;
+    public int friendColor = 0xFF5CE67E;
+    public List<String> friends = new ArrayList<>();
+
+    // Ивенты (Таймер)
+    public boolean showEventTimer = false;
+    public String eventName = "Ивент";
+    public long eventEndTimeMs = 0L;
+
+    // Точки (Waypoints)
+    public boolean showWaypoints = true;
+    public List<Waypoint> waypoints = new ArrayList<>();
+
+    // Маленький меч и камера
     public boolean smallSword = true;
     public boolean onlyWeapons = false;
     public float swordScale = 0.65f;
@@ -176,7 +228,7 @@ public class ArtemConfig {
     public boolean colorCorrection = false;
 
     // Цвета окна меню
-    public int clientAccent = 0xFF8A7CFF;
+    public int clientAccent = 0xFFA594F9;
     public int windowBgColor = 0x0E0E15;
     public float windowAlpha = 0.92f;
     public float customHue = 0.70f;
@@ -201,6 +253,8 @@ public class ArtemConfig {
         if (next != null) {
             if (next.hudPositions == null) next.hudPositions = new HashMap<>();
             if (next.keybinds == null) next.keybinds = new HashMap<>();
+            if (next.friends == null) next.friends = new ArrayList<>();
+            if (next.waypoints == null) next.waypoints = new ArrayList<>();
             INSTANCE = next;
             INSTANCE.save();
         }
@@ -214,29 +268,20 @@ public class ArtemConfig {
                 if (cfg != null) {
                     if (cfg.hudPositions == null) cfg.hudPositions = new HashMap<>();
                     if (cfg.keybinds == null) cfg.keybinds = new HashMap<>();
-                    if (cfg.configVersion < 33) {
-                        cfg.configVersion = 33;
-                        cfg.hudPositions.clear();
-                        cfg.hudScale = 0.80f;
-                        cfg.guiScale = 0.92f;
-                        cfg.hudAccentColor = 0xFF8A7CFF;
-                        cfg.hudBgColor = 0x101018;
-                        cfg.hudBgAlpha = 0.84f;
-                        cfg.showServer = true;
-                        cfg.showInventory = true;
-                        cfg.showPotions = true;
-                        cfg.showHotKeys = true;
-                        cfg.showPaperdoll = true;
-                        cfg.showTargetHud = true;
-                        cfg.showArmor = true;
-                        cfg.handGlow = true;
-                        cfg.smallSword = true;
-                        cfg.swordScale = 0.65f;
-                        cfg.noHurtCam = true;
-                        cfg.lowFire = true;
-                        cfg.projectileTrails = true;
-                        cfg.screenVignette = true;
-                        cfg.critSparks = true;
+                    if (cfg.friends == null) cfg.friends = new ArrayList<>();
+                    if (cfg.waypoints == null) cfg.waypoints = new ArrayList<>();
+                    if (cfg.configVersion < 34) {
+                        cfg.configVersion = 34;
+                        cfg.autoSprint = true;
+                        cfg.showCooldowns = true;
+                        cfg.lowArmorAlert = true;
+                        cfg.potionExpiryAlert = true;
+                        cfg.deathCoords = true;
+                        cfg.autoDeathWaypoint = true;
+                        cfg.ahUnitPrice = true;
+                        cfg.ahSearchHandItem = true;
+                        cfg.showWaypoints = true;
+                        cfg.highlightFriends = true;
                         cfg.save();
                     }
                     return cfg;
@@ -255,6 +300,14 @@ public class ArtemConfig {
             Files.writeString(CONFIG_PATH, GSON.toJson(this), StandardCharsets.UTF_8);
         } catch (Exception ignored) {
         }
+    }
+
+    public boolean isFriend(String name) {
+        if (name == null || friends == null) return false;
+        for (String f : friends) {
+            if (f != null && f.equalsIgnoreCase(name)) return true;
+        }
+        return false;
     }
 
     public String exportBase64() {
