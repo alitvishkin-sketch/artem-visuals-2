@@ -87,10 +87,11 @@ public class ArtemScreen extends Screen {
         }
     }
 
+    private final Screen parent;
     private Tab currentTab = Tab.VISUALS;
     private int scrollOffset = 0;
 
-    // Выдвижная панель настроек справа (как на референсе)
+    // Выдвижная панель настроек справа
     private ModuleCard activeSettingsCard = null;
     private boolean themeDrawerOpen = false;
     private int activeDrawerY = 0;
@@ -114,7 +115,12 @@ public class ArtemScreen extends Screen {
     private int drawerX, drawerY, drawerW, drawerH;
 
     public ArtemScreen() {
+        this(null);
+    }
+
+    public ArtemScreen(Screen parent) {
         super(Text.literal("ARTEM VISUALS"));
+        this.parent = parent;
     }
 
     @Override
@@ -123,8 +129,16 @@ public class ArtemScreen extends Screen {
     }
 
     @Override
+    public void close() {
+        if (this.client != null) {
+            this.client.setScreen(this.parent);
+        } else {
+            super.close();
+        }
+    }
+
+    @Override
     public void renderBackground(DrawContext ctx, int mouseX, int mouseY, float delta) {
-        // Лёгкое затемнение мира без мыльного размытия, чтобы мир оставался читаемым на фоне
         ctx.fill(0, 0, this.width, this.height, 0x6208080E);
     }
 
@@ -186,7 +200,7 @@ public class ArtemScreen extends Screen {
                     () -> c.targetEspSpeed, v -> { c.targetEspSpeed = v; c.save(); }));
             list.add(targetEsp);
 
-            // 6. World Customizer (как на скриншоте справа!)
+            // 6. World Customizer
             ModuleCard worldCust = new ModuleCard("world_cust", "World Customizer",
                     () -> c.worldCustomizer,
                     () -> { c.worldCustomizer = !c.worldCustomizer; c.save(); },
@@ -392,7 +406,6 @@ public class ArtemScreen extends Screen {
             boolean hov = isHovered(mouseX, mouseY, tx, tabBarY, tabW, tabH);
             if (active) {
                 NeonButton.fillSmoothRounded(ctx, tx, tabBarY, tabW, tabH, 5, 0xFF32323B);
-                // Тонкая неоновая полоска снизу активного таба в нашем стиле
                 NeonButton.fillSmoothRounded(ctx, tx + 16, tabBarY + tabH - 2, tabW - 32, 2, 1, NeonButton.ACCENT_BRIGHT);
             } else if (hov) {
                 NeonButton.fillSmoothRounded(ctx, tx, tabBarY, tabW, tabH, 5, 0x16FFFFFF);
@@ -455,7 +468,7 @@ public class ArtemScreen extends Screen {
                     ctx.fill(dotX + 8, dotY, dotX + 10, dotY + 2, dotCol);
                 }
 
-                // Pill-переключатель справа (точно как на скриншоте, но с нашим акцентом)
+                // Pill-переключатель справа
                 int swW = 26;
                 int swH = 14;
                 int swX = cx + cardW - swW - 11;
@@ -464,7 +477,7 @@ public class ArtemScreen extends Screen {
             }
         }
 
-        // Тонкий скроллбар справа от сетки, если модулей больше 10
+        // Тонкий скроллбар справа от сетки
         if (maxScroll > 0) {
             int trackX = winX + winW - 7;
             int trackY = gridY + 2;
@@ -475,11 +488,10 @@ public class ArtemScreen extends Screen {
             NeonButton.fillSmoothRounded(ctx, trackX, thumbY, 2, thumbH, 1, NeonButton.ACCENT_BRIGHT);
         }
 
-        // 4. Выдвижная панель настроек и HSB-палитры справа (как на скриншоте!)
+        // 4. Выдвижная панель настроек и HSB-палитры справа
         if (themeDrawerOpen) {
             renderThemeDrawer(ctx, mouseX, mouseY);
         } else if (activeSettingsCard != null) {
-            // Обновляем ссылку на карточку с актуальными лямбдами
             for (ModuleCard fresh : cards) {
                 if (fresh.id.equals(activeSettingsCard.id)) {
                     activeSettingsCard = fresh;
@@ -492,7 +504,7 @@ public class ArtemScreen extends Screen {
 
     private void renderModuleDrawer(DrawContext ctx, ModuleCard card, int mouseX, int mouseY) {
         drawerW = 162;
-        int contentH = 26; // заголовок
+        int contentH = 26;
         contentH += card.subToggles.size() * 22;
         contentH += card.subSliders.size() * 24;
         boolean hasColor = (card.colorGetter != null && card.colorSetter != null);
@@ -504,13 +516,11 @@ public class ArtemScreen extends Screen {
         drawerX = Math.min(this.width - drawerW - 6, winX + winW + 10);
         drawerY = Math.max(8, Math.min(this.height - drawerH - 8, activeDrawerY));
 
-        // Фон правой панели
         NeonButton.fillSmoothRounded(ctx, drawerX - 2, drawerY - 2, drawerW + 4, drawerH + 4, 11, 0x4504040A);
         NeonButton.fillGradientRounded(ctx, drawerX, drawerY, drawerW, drawerH, 9,
                 withAlpha(NeonButton.WINDOW_TOP, 0xF2), withAlpha(NeonButton.WINDOW_BOTTOM, 0xF5));
         NeonButton.drawSmoothRoundedOutline(ctx, drawerX, drawerY, drawerW, drawerH, 9, 0x26FFFFFF);
 
-        // Заголовок карточки + кнопка закрытия
         ctx.drawText(this.textRenderer, card.name, drawerX + 10, drawerY + 8, NeonButton.ACCENT_BRIGHT, false);
         int xBtnX = drawerX + drawerW - 15;
         int xBtnY = drawerY + 7;
@@ -519,14 +529,12 @@ public class ArtemScreen extends Screen {
 
         int ry = drawerY + 25;
 
-        // Под-переключатели (pill switches)
         for (SubToggle st : card.subToggles) {
             ctx.drawText(this.textRenderer, st.label, drawerX + 10, ry + 3, 0xFFE6E6F2, false);
             drawPillSwitch(ctx, drawerX + drawerW - 35, ry, 25, 13, st.getter.getAsBoolean());
             ry += 22;
         }
 
-        // Слайдеры параметров (радиус, длина, скорость)
         for (SubSlider sl : card.subSliders) {
             float val = sl.getter.get();
             String valTxt = sl.isInt ? String.valueOf(Math.round(val)) : String.format("%.1f", val);
@@ -547,7 +555,6 @@ public class ArtemScreen extends Screen {
             ry += 24;
         }
 
-        // Строка «Кастомный цвет» + квадрат цвета + HSB-палитра
         if (hasColor) {
             int curCol = card.colorGetter.getAsInt();
             syncPickerFromColor(curCol);
@@ -560,7 +567,7 @@ public class ArtemScreen extends Screen {
             ry += 21;
 
             if (colorPickerExpanded) {
-                renderHsbPicker(ctx, drawerX + 10, ry, drawerW - 20, card.colorSetter);
+                renderHsbPicker(ctx, drawerX + 10, ry, drawerW - 20);
             }
         }
     }
@@ -582,7 +589,6 @@ public class ArtemScreen extends Screen {
         ctx.drawText(this.textRenderer, "×", xBtnX, xBtnY,
                 isHovered(mouseX, mouseY, xBtnX - 3, xBtnY - 2, 12, 12) ? 0xFFFFFFFF : 0xFF8E8EA6, false);
 
-        // Быстрые пресеты неонового акцента
         int[] presets = {0xFF00D4FF, 0xFF9D4EDD, 0xFF00F59B, 0xFFFF4D8D, 0xFFFFB703};
         int px = drawerX + 10;
         int py = drawerY + 26;
@@ -604,16 +610,14 @@ public class ArtemScreen extends Screen {
         NeonButton.fillSmoothRounded(ctx, boxX, boxY, 13, 13, 3, 0xFF000000 | (curCol & 0x00FFFFFF));
         NeonButton.drawSmoothRoundedOutline(ctx, boxX, boxY, 13, 13, 3, 0xCCFFFFFF);
 
-        renderHsbPicker(ctx, drawerX + 10, ry + 21, drawerW - 20, ArtemScreen::applyClientAccent);
+        renderHsbPicker(ctx, drawerX + 10, ry + 21, drawerW - 20);
     }
 
-    private void renderHsbPicker(DrawContext ctx, int px, int py, int pw, IntConsumer onColorChanged) {
+    private void renderHsbPicker(DrawContext ctx, int px, int py, int pw) {
         int boxH = 72;
-        // Внутренняя подложка палитры
         NeonButton.fillSmoothRounded(ctx, px - 2, py - 2, pw + 4, boxH + 22, 6, 0xFF282832);
         NeonButton.drawSmoothRoundedOutline(ctx, px - 2, py - 2, pw + 4, boxH + 22, 6, 0x24FFFFFF);
 
-        // Обновляем кэш 2D-градиента только при изменении Hue
         if (Math.abs(cachedHue - pickerHue) > 0.002f) {
             cachedHue = pickerHue;
             for (int row = 0; row < 36; row++) {
@@ -625,7 +629,6 @@ public class ArtemScreen extends Screen {
             }
         }
 
-        // Отрисовка 2D-квадрата Saturation x Brightness
         for (int row = 0; row < 36; row++) {
             int y1 = py + (row * boxH) / 36;
             int y2 = py + ((row + 1) * boxH) / 36;
@@ -636,12 +639,10 @@ public class ArtemScreen extends Screen {
             }
         }
 
-        // Кольцо выбранной точки на 2D-квадрате
         int selX = px + Math.round(pickerSat * (pw - 1));
         int selY = py + Math.round((1.0f - pickerBri) * (boxH - 1));
         NeonButton.drawSmoothRoundedOutline(ctx, selX - 3, selY - 3, 7, 7, 3, 0xFFFFFFFF);
 
-        // Радужная полоска Hue снизу
         int hueY = py + boxH + 5;
         int hueH = 10;
         for (int i = 0; i < pw; i++) {
@@ -650,7 +651,6 @@ public class ArtemScreen extends Screen {
             ctx.fill(px + i, hueY, px + i + 1, hueY + hueH, hCol);
         }
 
-        // Белый бегунок на радужной полоске
         int hueKnobX = px + Math.round(pickerHue * (pw - 5));
         NeonButton.fillSmoothRounded(ctx, hueKnobX, hueY - 1, 5, hueH + 2, 2, 0xFFFFFFFF);
     }
@@ -668,14 +668,12 @@ public class ArtemScreen extends Screen {
     }
 
     private void drawMoonIcon(DrawContext ctx, int cx, int cy, int col) {
-        // Аккуратный полумесяц + звёздочки в стиле скриншота
         ctx.fill(cx - 2, cy - 5, cx + 1, cy - 4, col);
         ctx.fill(cx - 4, cy - 4, cx - 2, cy - 2, col);
         ctx.fill(cx - 5, cy - 2, cx - 3, cy + 2, col);
         ctx.fill(cx - 4, cy + 2, cx - 2, cy + 4, col);
         ctx.fill(cx - 2, cy + 4, cx + 2, cy + 5, col);
         ctx.fill(cx + 2, cy + 3, cx + 4, cy + 4, col);
-        // Звёздочка справа сверху от месяца
         ctx.fill(cx + 3, cy - 4, cx + 4, cy - 1, col);
         ctx.fill(cx + 2, cy - 3, cx + 5, cy - 2, col);
         ctx.fill(cx + 1, cy - 6, cx + 2, cy - 5, col);
@@ -686,20 +684,17 @@ public class ArtemScreen extends Screen {
         int mx = (int) mouseX;
         int my = (int) mouseY;
 
-        // 1. Клик по правой выдвижной панели настроек
         if (themeDrawerOpen) {
             if (handleThemeDrawerClick(mx, my)) return true;
         } else if (activeSettingsCard != null) {
             if (handleModuleDrawerClick(activeSettingsCard, mx, my)) return true;
         }
 
-        // 2. Красная точка закрытия (слева сверху)
         if (isHovered(mx, my, winX + 8, winY + 8, 14, 14)) {
             this.close();
             return true;
         }
 
-        // 3. Иконка полумесяца (справа сверху) — открывает настройки темы клиента
         if (isHovered(mx, my, winX + winW - 26, winY + 9, 18, 18)) {
             themeDrawerOpen = !themeDrawerOpen;
             if (themeDrawerOpen) {
@@ -709,7 +704,6 @@ public class ArtemScreen extends Screen {
             return true;
         }
 
-        // 4. Клик по вкладкам (Visuals / HUD / Utilities)
         int tabTotalW = 204;
         int tabBarX = winX + (winW - tabTotalW) / 2;
         int tabBarY = winY + 12;
@@ -725,7 +719,6 @@ public class ArtemScreen extends Screen {
             }
         }
 
-        // 5. Клик по карточкам в 2 колонки: ЛКМ — вкл/выкл, ПКМ — открыть настройки справа
         List<ModuleCard> cards = buildCardsForTab(currentTab);
         int totalRows = (cards.size() + 1) / 2;
         int visibleRows = 5;
@@ -770,7 +763,6 @@ public class ArtemScreen extends Screen {
         if (!isHovered(mx, my, drawerX - 4, drawerY - 4, drawerW + 8, drawerH + 8)) {
             return false;
         }
-        // Кнопка закрытия панели ×
         if (isHovered(mx, my, drawerX + drawerW - 18, drawerY + 4, 15, 15)) {
             activeSettingsCard = null;
             return true;
