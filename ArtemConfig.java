@@ -52,7 +52,7 @@ public class ArtemConfig {
         }
     }
 
-    public int configVersion = 34;
+    public int configVersion = 35;
 
     // Базовые настройки
     public boolean masterEnabled = true;
@@ -113,11 +113,24 @@ public class ArtemConfig {
     public boolean deathCoords = true;
     public boolean autoDeathWaypoint = true;
 
-    // Аукцион (Помощник)
+    // Таймер эндер-жемчуга
+    public boolean pearlTimer = true;
+    public boolean pearlTrajectory = true;
+    public int pearlColor = 0xFF00F5FF;
+
+    // Границы Трапки / Пласта
+    public boolean trapPlastPreview = true;
+    public int trapPlastMode = 0; // 0 = Авто (по предмету), 1 = Трапка, 2 = Пласт
+    public int trapPlastWidth = 5;
+    public int trapPlastHeight = 4;
+    public int trapPlastColor = 0xFFA594F9;
+
+    // Аукцион (Помощник и бинды)
     public boolean ahUnitPrice = true;
     public boolean ahAutoRelist = false;
     public int ahRelistInterval = 60;
     public boolean ahSearchHandItem = true;
+    public int ahOpenKeyCode = 0;
     public int ahSearchKeyCode = 72; // Клавиша H
 
     // Друзья
@@ -270,18 +283,13 @@ public class ArtemConfig {
                     if (cfg.keybinds == null) cfg.keybinds = new HashMap<>();
                     if (cfg.friends == null) cfg.friends = new ArrayList<>();
                     if (cfg.waypoints == null) cfg.waypoints = new ArrayList<>();
-                    if (cfg.configVersion < 34) {
-                        cfg.configVersion = 34;
-                        cfg.autoSprint = true;
-                        cfg.showCooldowns = true;
-                        cfg.lowArmorAlert = true;
-                        cfg.potionExpiryAlert = true;
-                        cfg.deathCoords = true;
-                        cfg.autoDeathWaypoint = true;
-                        cfg.ahUnitPrice = true;
-                        cfg.ahSearchHandItem = true;
-                        cfg.showWaypoints = true;
-                        cfg.highlightFriends = true;
+                    if (cfg.configVersion < 35) {
+                        cfg.configVersion = 35;
+                        cfg.pearlTimer = true;
+                        cfg.pearlTrajectory = true;
+                        cfg.trapPlastPreview = true;
+                        if (cfg.trapPlastWidth < 3) cfg.trapPlastWidth = 5;
+                        if (cfg.trapPlastHeight < 2) cfg.trapPlastHeight = 4;
                         cfg.save();
                     }
                     return cfg;
@@ -343,3 +351,4 @@ public class ArtemConfig {
         return 45;
     }
 }
+// === КОНЕЦ ФАЙЛА ===
