@@ -16,12 +16,11 @@ import java.util.function.Consumer;
 import java.util.function.Supplier;
 
 /**
- * Главное меню Artem Visuals 2.0 — 5 категорий, неоновый стиль.
- * Категории: Эффекты | HUD | Прицел | Оптимизация | Профили
+ * Компактное неоновое меню Artem Visuals 2.0 — полностью помещается на любом экране.
  */
 public class ArtemScreen extends Screen {
-    private static final int W = 380;
-    private static final int H = 280;
+    private static final int W = 390;
+    private static final int H = 218;
     private static final String[] TABS = {"Эффекты", "HUD", "Прицел", "Оптимизация", "Профили"};
     private static final String[] LEVELS = {"Низкое", "Среднее", "Высокое"};
     private static final String[] STYLES = {"Крест", "Точка", "Круг", "Плюс"};
@@ -32,7 +31,6 @@ public class ArtemScreen extends Screen {
     private TextFieldWidget profileNameField;
     private String statusMessage = "";
     private long statusUntil = 0;
-    private float openAnim = 0f;
 
     public ArtemScreen(Screen parent) {
         super(Text.literal("ARTEM VISUALS"));
@@ -42,7 +40,7 @@ public class ArtemScreen extends Screen {
     @Override
     protected void init() {
         left = (width - W) / 2;
-        top = (height - H) / 2;
+        top = Math.max(4, (height - H) / 2);
         clearChildren();
         ArtemConfig c = ArtemConfig.get();
         MinecraftClient mc = MinecraftClient.getInstance();
@@ -51,17 +49,17 @@ public class ArtemScreen extends Screen {
         int tabW = (W - 20 - 4 * 3) / 5;
         for (int i = 0; i < 5; i++) {
             final int idx = i;
-            addBtn(left + 10 + i * (tabW + 3), top + 32, tabW, 18,
-                    () -> TABS[idx], () -> tab == idx, () -> {
+            addBtn(left + 10 + i * (tabW + 3), top + 26, tabW, 16,
+                    () -> TABS[idx], null, () -> {
                         tab = idx;
                         clearAndInit();
                     });
         }
 
-        int y = top + 58;
-        int cw = (W - 28) / 2;
-        int x0 = left + 12, x1 = x0 + cw + 4;
-        int step = 24;
+        int y = top + 48;
+        int cw = (W - 26) / 2;
+        int x0 = left + 10, x1 = x0 + cw + 6;
+        int step = 19;
 
         switch (tab) {
             case 0 -> buildEffects(c, mc, x0, x1, y, cw, step);
@@ -71,7 +69,7 @@ public class ArtemScreen extends Screen {
             case 4 -> buildProfiles(x0, y, cw);
         }
 
-        addBtn(left + W / 2 - 50, top + H - 26, 100, 18, () -> "Закрыть", null, this::close);
+        addBtn(left + W / 2 - 48, top + H - 22, 96, 16, () -> "Закрыть", null, this::close);
     }
 
     private void buildEffects(ArtemConfig c, MinecraftClient mc, int x0, int x1, int y, int cw, int step) {
@@ -106,15 +104,14 @@ public class ArtemScreen extends Screen {
     }
 
     private void buildHud(ArtemConfig c, int x0, int x1, int y, int cw, int step) {
-        toggle(x0, y, cw, "FPS", () -> c.showFps, v -> c.showFps = v);
-        toggle(x1, y, cw, "Ping", () -> c.showPing, v -> c.showPing = v);
-        toggle(x0, y + step, cw, "XYZ", () -> c.showXyz, v -> c.showXyz = v);
-        toggle(x1, y + step, cw, "CPS", () -> c.showCps, v -> c.showCps = v);
-        toggle(x0, y + step * 2, cw, "WASD", () -> c.showWasd, v -> c.showWasd = v);
-        toggle(x1, y + step * 2, cw, "Сервер", () -> c.showServer, v -> c.showServer = v);
-        toggle(x0, y + step * 3, cw * 2 + 4, "Режим редактирования HUD (перетаскивание)",
+        toggle(x0, y, cw, "Счётчик FPS", () -> c.showFps, v -> c.showFps = v);
+        toggle(x1, y, cw, "Пинг (Ping)", () -> c.showPing, v -> c.showPing = v);
+        toggle(x0, y + step, cw, "Координаты XYZ", () -> c.showXyz, v -> c.showXyz = v);
+        toggle(x1, y + step, cw, "Клики в сек (CPS)", () -> c.showCps, v -> c.showCps = v);
+        toggle(x0, y + step * 2, cw, "Клавиши WASD", () -> c.showWasd, v -> c.showWasd = v);
+        toggle(x1, y + step * 2, cw, "Текущий сервер", () -> c.showServer, v -> c.showServer = v);
+        toggle(x0, y + step * 3 + 4, cw * 2 + 6, "Режим перетаскивания HUD на экране",
                 () -> c.hudEditMode, v -> c.hudEditMode = v);
-        // Подсказка рисуется в render
     }
 
     private void buildCrosshair(ArtemConfig c, int x0, int x1, int y, int cw, int step) {
@@ -131,77 +128,73 @@ public class ArtemScreen extends Screen {
         cycle(x0, y + step * 2, cw, () -> "Толщина: " + c.crosshairThickness, () -> {
             c.crosshairThickness = c.crosshairThickness >= 3 ? 1 : c.crosshairThickness + 1;
         });
-        toggle(x1, y + step * 2, cw, "Обводка", () -> c.crosshairOutline, v -> c.crosshairOutline = v);
+        toggle(x1, y + step * 2, cw, "Чёрная обводка", () -> c.crosshairOutline, v -> c.crosshairOutline = v);
         toggle(x0, y + step * 3, cw, "Динамический", () -> c.crosshairDynamic, v -> c.crosshairDynamic = v);
-        // Цвет: несколько пресетов
         cycle(x1, y + step * 3, cw, () -> "Цвет: " + colorName(c.crosshairColor), () -> {
             c.crosshairColor = nextColor(c.crosshairColor);
         });
     }
 
     private void buildOptimize(ArtemConfig c, MinecraftClient mc, int x0, int x1, int y, int cw, int step) {
-        addBtn(x0, y, cw * 2 + 4, 22, () -> "Применить пресет производительности", null, () -> {
+        addBtn(x0, y, cw * 2 + 6, 20, () -> "⚡ Применить пресет производительности", null, () -> {
             Optimizer.applyPerformancePreset(mc);
-            setStatus("Пресет применён");
+            setStatus("Пресет производительности применён");
         });
-        addBtn(x0, y + step + 4, cw * 2 + 4, 22,
-                () -> Optimizer.hasBackup() ? "Вернуть прежние настройки видео" : "Бэкап отсутствует",
+        addBtn(x0, y + step + 5, cw * 2 + 6, 20,
+                () -> Optimizer.hasBackup() ? "↺ Вернуть прежние настройки видео" : "Бэкап настроек отсутствует",
                 null, () -> {
                     if (Optimizer.hasBackup()) {
                         Optimizer.restoreSettings(mc);
-                        setStatus("Настройки восстановлены");
+                        setStatus("Настройки видео восстановлены");
                     } else {
                         setStatus("Нечего восстанавливать");
                     }
                 });
-        addBtn(x0, y + step * 2 + 8, cw * 2 + 4, 22, () -> "Сбросить все настройки мода", null, () -> {
+        addBtn(x0, y + step * 2 + 10, cw * 2 + 6, 20, () -> "Сбросить все настройки мода", null, () -> {
             c.resetDefaults();
             clearAndInit();
-            setStatus("Сброшено к умолчаниям");
+            setStatus("Настройки сброшены");
         });
     }
 
     private void buildProfiles(int x0, int y, int cw) {
-        profileNameField = new TextFieldWidget(textRenderer, x0, y, cw * 2 + 4, 18, Text.literal("Имя профиля"));
+        profileNameField = new TextFieldWidget(textRenderer, x0, y, cw * 2 + 6, 16, Text.literal("Имя профиля"));
         profileNameField.setMaxLength(32);
-        profileNameField.setPlaceholder(Text.literal("Имя нового профиля..."));
+        profileNameField.setPlaceholder(Text.literal("Введите имя профиля..."));
         addDrawableChild(profileNameField);
 
-        addBtn(x0, y + 26, cw, 20, () -> "Сохранить", null, () -> {
+        addBtn(x0, y + 20, cw, 17, () -> "Сохранить профиль", null, () -> {
             String name = profileNameField.getText();
             if (ProfileManager.saveProfile(name)) {
                 setStatus("Профиль «" + name + "» сохранён");
                 clearAndInit();
             } else {
-                setStatus("Ошибка сохранения");
+                setStatus("Введите корректное имя профиля");
             }
         });
-        addBtn(x0 + cw + 4, y + 26, cw, 20, () -> "Обновить список", null, this::clearAndInit);
+        addBtn(x0 + cw + 6, y + 20, cw, 17, () -> "Обновить список", null, this::clearAndInit);
 
         List<String> profiles = ProfileManager.listProfiles();
-        int py = y + 54;
+        int py = y + 42;
         int i = 0;
         for (String name : profiles) {
-            if (i >= 5) break; // лимит видимых
+            if (i >= 4) break;
             final String n = name;
-            addBtn(x0, py, cw + 20, 18, () -> "▶ " + n, null, () -> {
+            addBtn(x0, py, cw * 2 - 48, 17, () -> "▶ Загрузить: " + n, null, () -> {
                 if (ProfileManager.loadProfile(n)) {
-                    setStatus("Загружен: " + n);
+                    setStatus("Загружен профиль: " + n);
                     clearAndInit();
                 } else {
                     setStatus("Ошибка загрузки");
                 }
             });
-            addBtn(x0 + cw + 24, py, 50, 18, () -> "Удал.", null, () -> {
+            addBtn(x0 + cw * 2 - 44, py, 50, 17, () -> "Удал.", null, () -> {
                 ProfileManager.deleteProfile(n);
                 setStatus("Удалён: " + n);
                 clearAndInit();
             });
-            py += 22;
+            py += 19;
             i++;
-        }
-        if (profiles.isEmpty()) {
-            // подсказка в render
         }
     }
 
@@ -212,14 +205,14 @@ public class ArtemScreen extends Screen {
     }
 
     private void toggle(int x, int y, int w, String name, BooleanSupplier get, Consumer<Boolean> set) {
-        addBtn(x, y, w, 20, () -> name + ": " + (get.getAsBoolean() ? "ВКЛ" : "ВЫКЛ"), get, () -> {
+        addBtn(x, y, w, 17, () -> name, get, () -> {
             set.accept(!get.getAsBoolean());
             ArtemConfig.get().save();
         });
     }
 
     private void cycle(int x, int y, int w, Supplier<String> label, Runnable change) {
-        addBtn(x, y, w, 20, label, null, () -> {
+        addBtn(x, y, w, 17, label, null, () -> {
             change.run();
             ArtemConfig.get().save();
         });
@@ -251,69 +244,78 @@ public class ArtemScreen extends Screen {
 
     @Override
     public void renderBackground(DrawContext ctx, int mouseX, int mouseY, float delta) {
-        // Затемнение
-        ctx.fill(0, 0, width, height, 0xB0000000);
+        // Затемнение фона
+        ctx.fill(0, 0, width, height, 0xA805040A);
 
-        // Основная панель
-        int bg = 0xF00A0814;
-        ctx.fill(left, top, left + W, top + H, bg);
+        // Тень под панелью
+        ctx.fill(left - 3, top - 3, left + W + 3, top + H + 3, 0x55000000);
+
+        // Основная панель (тёмное стекло)
+        ctx.fill(left, top, left + W, top + H, 0xF20B0917);
+
+        // Градиентная шапка
+        ctx.fillGradient(left + 1, top + 1, left + W - 1, top + 23, 0xFF1F143D, 0xFF0E0B1E);
 
         // Неоновая рамка
         int neon = NeonButton.NEON;
-        // outer glow
-        ctx.fill(left - 1, top - 1, left + W + 1, top, neon & 0x66FFFFFF);
-        ctx.fill(left - 1, top + H, left + W + 1, top + H + 1, neon & 0x66FFFFFF);
-        ctx.fill(left - 1, top, left, top + H, neon & 0x66FFFFFF);
-        ctx.fill(left + W, top, left + W + 1, top + H, neon & 0x66FFFFFF);
-        // solid border
-        ctx.fill(left, top, left + W, top + 2, neon);
-        ctx.fill(left, top + H - 2, left + W, top + H, neon);
-        ctx.fill(left, top, left + 2, top + H, neon);
-        ctx.fill(left + W - 2, top, left + W, top + H, neon);
+        ctx.fill(left + 1, top, left + W - 1, top + 1, neon);
+        ctx.fill(left + 1, top + H - 1, left + W - 1, top + H, neon);
+        ctx.fill(left, top + 1, left + 1, top + H - 1, neon);
+        ctx.fill(left + W - 1, top + 1, left + W, top + H - 1, neon);
 
-        // Accent line under header
-        ctx.fill(left + 8, top + 28, left + W - 8, top + 29, NeonButton.NEON_DIM);
+        // Разделитель под шапкой
+        ctx.fill(left + 8, top + 22, left + W - 8, top + 23, 0x669B59FF);
+
+        // Индикатор активной вкладки
+        int tabW = (W - 20 - 4 * 3) / 5;
+        int activeTabX = left + 10 + tab * (tabW + 3);
+        ctx.fill(activeTabX + 2, top + 41, activeTabX + tabW - 2, top + 43, 0xFF38F2AF);
     }
 
     @Override
     public void render(DrawContext ctx, int mouseX, int mouseY, float delta) {
-        openAnim = Math.min(1f, openAnim + delta * 0.15f);
         super.render(ctx, mouseX, mouseY, delta);
 
-        // Логотип с короной
-        String logo = "♛  ARTEM VISUALS  2.0";
-        int logoColor = 0xFFE0C0FF;
-        ctx.drawText(textRenderer, logo, left + 12, top + 10, logoColor, true);
+        // Заголовок + стильный бейдж версии
+        String title = "♛ ARTEM VISUALS";
+        ctx.drawText(textRenderer, title, left + 10, top + 7, 0xFFF2EAFF, true);
 
-        // FPS в углу меню
+        int badgeX = left + 12 + textRenderer.getWidth(title);
+        ctx.fill(badgeX, top + 6, badgeX + 22, top + 16, 0x4438F2AF);
+        ctx.drawText(textRenderer, "2.0", badgeX + 3, top + 7, 0xFF4CFFBE, false);
+
+        // Живой счётчик FPS в правом углу шапки
         int fps = MinecraftClient.getInstance().getCurrentFps();
-        String f = "FPS " + fps;
-        int col = fps >= 60 ? 0xFF55FFAA : (fps >= 30 ? 0xFFAA88FF : 0xFFFF5566);
-        ctx.drawText(textRenderer, f, left + W - 12 - textRenderer.getWidth(f), top + 10, col, true);
+        String f = fps + " FPS";
+        int col = fps >= 60 ? 0xFF4CFFBE : (fps >= 30 ? 0xFFC77DFF : 0xFFFF5566);
+        ctx.drawText(textRenderer, f, left + W - 10 - textRenderer.getWidth(f), top + 7, col, true);
 
-        // Предпросмотр прицела
+        // Компактный предпросмотр прицела
         if (tab == 2) {
             int px = left + W / 2;
-            int py = top + H - 70;
-            ctx.fill(px - 28, py - 28, px + 28, py + 28, 0xFF12101C);
-            ctx.fill(px - 27, py - 27, px + 27, py - 26, NeonButton.NEON_DIM);
-            ctx.fill(px - 27, py + 26, px + 27, py + 27, NeonButton.NEON_DIM);
+            int py = top + 152;
+            ctx.fill(px - 24, py - 24, px + 24, py + 24, 0xFF141124);
+            ctx.fill(px - 24, py - 24, px + 24, py - 23, NeonButton.NEON_DIM);
+            ctx.fill(px - 24, py + 23, px + 24, py + 24, NeonButton.NEON_DIM);
+            ctx.fill(px - 24, py - 24, px - 23, py + 24, NeonButton.NEON_DIM);
+            ctx.fill(px + 23, py - 24, px + 24, py + 24, NeonButton.NEON_DIM);
             CrosshairRenderer.renderPreview(ctx, px, py, ArtemConfig.get());
-            ctx.drawCenteredTextWithShadow(textRenderer, "Предпросмотр", px, py + 32, 0xFF8888AA);
+            ctx.drawCenteredTextWithShadow(textRenderer, "Предпросмотр", px, py + 27, 0xFF9A92B8);
         }
 
         // Подсказка HUD
         if (tab == 1 && ArtemConfig.get().hudEditMode) {
-            ctx.drawText(textRenderer, "§dПеретаскивайте элементы на экране мышью", left + 14, top + H - 48, 0xFFC0A0FF, false);
+            ctx.drawCenteredTextWithShadow(textRenderer, "Перетаскивайте элементы HUD прямо на игровом экране",
+                    left + W / 2, top + 136, 0xFF4CFFBE);
         }
 
-        // Статус
+        // Статус-сообщение
         if (System.currentTimeMillis() < statusUntil && !statusMessage.isEmpty()) {
-            ctx.drawCenteredTextWithShadow(textRenderer, statusMessage, left + W / 2, top + H - 48, 0xFFAAFFCC);
+            ctx.drawCenteredTextWithShadow(textRenderer, statusMessage, left + W / 2, top + H - 34, 0xFF4CFFBE);
         }
 
         if (tab == 4 && ProfileManager.listProfiles().isEmpty()) {
-            ctx.drawText(textRenderer, "§7Нет сохранённых профилей", left + 14, top + 120, 0xFF888899, false);
+            ctx.drawCenteredTextWithShadow(textRenderer, "Нет сохранённых профилей", left + W / 2, top + 115, 0xFF8880A8);
         }
     }
 
