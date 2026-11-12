@@ -9,10 +9,12 @@ import net.minecraft.block.BlockState;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.PlayerSkinDrawer;
+import net.minecraft.client.gui.screen.ingame.InventoryScreen;
 import net.minecraft.client.network.AbstractClientPlayerEntity;
 import net.minecraft.client.network.ClientPlayNetworkHandler;
 import net.minecraft.client.network.PlayerListEntry;
 import net.minecraft.client.network.ServerInfo;
+import net.minecraft.client.util.InputUtil;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.ItemEntity;
 import net.minecraft.entity.LivingEntity;
@@ -25,11 +27,15 @@ import net.minecraft.util.math.MathHelper;
 import net.minecraft.world.Heightmap;
 import org.lwjgl.glfw.GLFW;
 
+import java.awt.Color;
+import java.time.LocalTime;
+import java.time.format.DateTimeFormatter;
 import java.util.*;
 
 public final class HudManager {
     private static final List<HudElement> ELEMENTS = new ArrayList<>();
     private static final long SESSION_START_MS = System.currentTimeMillis();
+    private static final DateTimeFormatter CLOCK_FMT = DateTimeFormatter.ofPattern("HH:mm:ss");
     private static long lastAttackMs = 0;
 
     private static final long[] lmbTimestamps = new long[64];
@@ -45,9 +51,11 @@ public final class HudManager {
 
     static {
         ELEMENTS.add(new TopBarElement());
-        ELEMENTS.add(new HotKeysElement());
-        ELEMENTS.add(new TargetHudElement());
+        ELEMENTS.add(new InventoryElement());
         ELEMENTS.add(new PotionsElement());
+        ELEMENTS.add(new HotKeysElement());
+        ELEMENTS.add(new PaperdollElement());
+        ELEMENTS.add(new TargetHudElement());
         ELEMENTS.add(new ArmorElement());
         ELEMENTS.add(new ArrayListElement());
         ELEMENTS.add(new FpsElement());
@@ -197,8 +205,22 @@ public final class HudManager {
     public static void applyPulsePreset() {
         ArtemConfig c = ArtemConfig.get();
         c.hudPositions.clear();
-        c.showServer = true; c.showTargetHud = true; c.showHotKeys = true;
-        c.showPotions = true; c.showArmor = true;
+        c.hudScale = 0.80f;
+        c.hudAccentColor = 0xFF8A7CFF;
+        c.hudBgColor = 0x101018;
+        c.hudBgAlpha = 0.84f;
+        c.hudRainbow = false;
+        c.hudUseCustomHue = false;
+
+        c.showServer = true;
+        c.showInventory = true;
+        c.showPotions = true;
+        c.showHotKeys = true;
+        c.showPaperdoll = true;
+        c.showTargetHud = true;
+        c.showArmor = true;
+        c.handGlow = true;
+
         c.showArrayList = false; c.showXyz = false; c.showFps = false;
         c.showPing = false; c.showCps = false; c.showWasd = false;
         c.showKeystrokes = false; c.showSpeed = false; c.showDirection = false;
@@ -214,7 +236,7 @@ public final class HudManager {
         c.renderTweaks = true; c.softLighting = true; c.customCrosshair = true;
         c.smallSword = true; c.noHurtCam = true; c.lowFire = true;
         c.crosshairStyle = 0; c.crosshairSize = 4; c.crosshairGap = 2; c.crosshairThickness = 1;
-        c.crosshairOutline = true; c.crosshairDynamic = true; c.crosshairColor = 0xFF00F5FF;
+        c.crosshairOutline = true; c.crosshairDynamic = true; c.crosshairColor = 0xFFE8E8F4;
         c.save();
         if (mc != null) { Optimizer.applyLighting(mc); Optimizer.applyPerformancePreset(mc); }
     }
@@ -236,96 +258,248 @@ public final class HudManager {
         return (mc != null && mc.getWindow() != null) ? mc.getWindow().getScaledHeight() : 240;
     }
 
-    private static int hudBorder() {
-        return (NeonButton.getHudAccent(0) & 0x00FFFFFF) | 0x3C000000;
-    }
-
+    // 1. Верхняя панель по центру (Ник | FPS | Ping | Время)
     static class TopBarElement extends HudElement {
         TopBarElement() { super("server"); }
         @Override public boolean isEnabled(ArtemConfig c) { return c.showServer; }
         @Override public String getText(MinecraftClient mc) {
-            ServerInfo info = mc.getCurrentServerEntry();
-            if (info != null && info.address != null) {
-                return info.address.toLowerCase().contains("funtime") ? "mc.funtime.su" : info.address;
-            }
-            return "artemvisuals.pro";
+            return mc.player != null ? mc.player.getName().getString() : "Artem";
         }
         @Override public int getColor(MinecraftClient mc) { return NeonButton.getHudAccentBright(0); }
-        private String pingStr(MinecraftClient mc) { int p = queryPing(mc); return (p >= 0 ? p : 0) + "ms"; }
-        private String fpsStr(MinecraftClient mc) { return mc.getCurrentFps() + "fps"; }
+        private String fpsStr(MinecraftClient mc) { return mc.getCurrentFps() + " FPS"; }
+        private String pingStr(MinecraftClient mc) { int p = queryPing(mc); return (p >= 0 ? p : 0) + " ms"; }
+        private String timeStr() { return LocalTime.now().format(CLOCK_FMT); }
 
         @Override protected void measure(MinecraftClient mc) {
-            width = 14 + mc.textRenderer.getWidth(getText(mc)) + 8
-                    + mc.textRenderer.getWidth(pingStr(mc)) + 8
-                    + mc.textRenderer.getWidth(fpsStr(mc)) + 6;
-            height = 13;
+            width = 16 + mc.textRenderer.getWidth(getText(mc)) + 9
+                    + mc.textRenderer.getWidth(fpsStr(mc)) + 9
+                    + mc.textRenderer.getWidth(pingStr(mc)) + 9
+                    + mc.textRenderer.getWidth(timeStr()) + 6;
+            height = 15;
         }
 
         @Override protected void renderBody(DrawContext ctx, MinecraftClient mc, ArtemConfig c, int x, int y) {
-            int acc = NeonButton.getHudAccent(0);
             int accB = NeonButton.getHudAccentBright(0);
-            NeonButton.fillGradientRounded(ctx, x, y, width, height, 4, NeonButton.HUD_BG_TOP, NeonButton.HUD_BG_BOTTOM);
-            NeonButton.drawSmoothRoundedOutline(ctx, x, y, width, height, 4, hudBorder());
+            NeonButton.fillGradientRounded(ctx, x, y, width, height, 5, NeonButton.HUD_BG_TOP, NeonButton.HUD_BG_BOTTOM);
+            NeonButton.drawSmoothRoundedOutline(ctx, x, y, width, height, 5, glassBorder());
 
-            int wx = x + 4, wy = y + 3;
-            ctx.fill(wx, wy + 3, wx + 2, wy + 4, acc);
-            ctx.fill(wx + 2, wy + 1, wx + 3, wy + 5, accB);
-            ctx.fill(wx + 3, wy + 2, wx + 4, wy + 6, acc);
-            ctx.fill(wx + 4, wy + 3, wx + 6, wy + 4, acc);
+            NeonButton.drawCircle(ctx, x + 8, y + 7, 3, accB);
+            NeonButton.drawCircle(ctx, x + 8, y + 7, 1, 0xFFFFFFFF);
 
-            int cx = x + 13, ty = y + 3;
-            String srv = getText(mc), ping = pingStr(mc), fps = fpsStr(mc);
-            ctx.drawText(mc.textRenderer, srv, cx, ty, 0xFFF2F2FA, false);
-            cx += mc.textRenderer.getWidth(srv) + 4;
-            ctx.fill(cx, y + 3, cx + 1, y + height - 3, 0x28FFFFFF);
-            cx += 4;
+            int cx = x + 15, ty = y + 4;
+            String name = getText(mc), fps = fpsStr(mc), ping = pingStr(mc), time = timeStr();
+
+            ctx.drawText(mc.textRenderer, name, cx, ty, 0xFFF2F2FA, false);
+            cx += mc.textRenderer.getWidth(name) + 4;
+            ctx.fill(cx, y + 4, cx + 1, y + height - 4, 0x28FFFFFF);
+            cx += 5;
+
+            ctx.drawText(mc.textRenderer, fps, cx, ty, 0xFFE2E2F0, false);
+            cx += mc.textRenderer.getWidth(fps) + 4;
+            ctx.fill(cx, y + 4, cx + 1, y + height - 4, 0x28FFFFFF);
+            cx += 5;
+
             ctx.drawText(mc.textRenderer, ping, cx, ty, accB, false);
             cx += mc.textRenderer.getWidth(ping) + 4;
-            ctx.fill(cx, y + 3, cx + 1, y + height - 3, 0x28FFFFFF);
-            cx += 4;
-            ctx.drawText(mc.textRenderer, fps, cx, ty, accB, false);
+            ctx.fill(cx, y + 4, cx + 1, y + height - 4, 0x28FFFFFF);
+            cx += 5;
+
+            ctx.drawText(mc.textRenderer, time, cx, ty, 0xFFB8B8CE, false);
         }
 
-        @Override protected int defaultX() { measure(MinecraftClient.getInstance()); return Math.max(6, (screenW() - Math.round(width * ArtemConfig.get().hudScale)) / 2); }
-        @Override protected int defaultY() { return 5; }
+        @Override protected int defaultX() {
+            measure(MinecraftClient.getInstance());
+            int scaledW = Math.round(width * ArtemConfig.get().hudScale);
+            return Math.max(8, (screenW() - scaledW) / 2);
+        }
+        @Override protected int defaultY() { return 6; }
     }
 
+    // 2. Мини-инвентарь в верхнем левом углу (как в Andromeda Visuals)
+    static class InventoryElement extends HudElement {
+        InventoryElement() { super("inventory"); }
+        @Override public boolean isEnabled(ArtemConfig c) { return c.showInventory; }
+        @Override public String getText(MinecraftClient mc) { return "Inventory"; }
+        @Override public int getColor(MinecraftClient mc) { return NeonButton.getHudAccentBright(0); }
+        @Override protected void measure(MinecraftClient mc) { width = 104; height = 49; }
+
+        @Override protected void renderBody(DrawContext ctx, MinecraftClient mc, ArtemConfig c, int x, int y) {
+            int accB = NeonButton.getHudAccentBright(0);
+            NeonButton.fillGradientRounded(ctx, x, y, width, height, 5, NeonButton.HUD_BG_TOP, NeonButton.HUD_BG_BOTTOM);
+            NeonButton.drawSmoothRoundedOutline(ctx, x, y, width, height, 5, glassBorder());
+
+            // Иконка сундучка + заголовок
+            NeonButton.fillSmoothRounded(ctx, x + 5, y + 4, 6, 5, 1, accB);
+            ctx.drawText(mc.textRenderer, "Inventory", x + 14, y + 3, 0xFFEAEAF6, false);
+            ctx.fill(x + 4, y + 13, x + width - 4, y + 14, 0x18FFFFFF);
+
+            if (mc.player == null) return;
+
+            int startX = x + 4;
+            int startY = y + 15;
+            float itemScale = 0.65f;
+            int cell = 11;
+
+            for (int row = 0; row < 3; row++) {
+                for (int col = 0; col < 9; col++) {
+                    int slot = 9 + row * 9 + col;
+                    int sx = startX + col * cell;
+                    int sy = startY + row * cell;
+                    ctx.fill(sx, sy, sx + 10, sy + 10, 0x16FFFFFF);
+
+                    ItemStack st = mc.player.getInventory().getStack(slot);
+                    if (!st.isEmpty()) {
+                        ctx.getMatrices().push();
+                        ctx.getMatrices().translate(sx, sy, 0);
+                        ctx.getMatrices().scale(itemScale, itemScale, 1f);
+                        ctx.drawItem(st, 0, 0);
+                        ctx.drawItemInSlot(mc.textRenderer, st, 0, 0);
+                        ctx.getMatrices().pop();
+                    }
+                }
+            }
+        }
+
+        @Override protected int defaultX() { return 6; }
+        @Override protected int defaultY() { return 6; }
+    }
+
+    // 3. Эффекты зелий (слева под инвентарём)
+    static class PotionsElement extends HudElement {
+        PotionsElement() { super("potions"); }
+        @Override public boolean isEnabled(ArtemConfig c) { return c.showPotions; }
+        @Override public String getText(MinecraftClient mc) { return "Potion effects"; }
+        @Override public int getColor(MinecraftClient mc) { return NeonButton.getHudAccentBright(0); }
+
+        private List<String[]> rows(MinecraftClient mc, ArtemConfig c) {
+            List<String[]> list = new ArrayList<>();
+            if (mc.player != null) {
+                for (StatusEffectInstance inst : mc.player.getStatusEffects()) {
+                    String name = inst.getEffectType().value().getName().getString();
+                    int amp = inst.getAmplifier();
+                    if (amp == 1) name += " II";
+                    else if (amp >= 2) name += " " + (amp + 1);
+                    String time = (inst.isInfinite() || inst.getDuration() < 0) ? "∞"
+                            : String.format("%d:%02d", (inst.getDuration() / 20) / 60, (inst.getDuration() / 20) % 60);
+                    list.add(new String[]{name, time, String.valueOf(0xFF000000 | inst.getEffectType().value().getColor())});
+                }
+            }
+            if (list.isEmpty() && c.hudEditMode) {
+                list.add(new String[]{"Resistance II", "∞", String.valueOf(0xFF9D8DF7)});
+                list.add(new String[]{"Speed II", "2:18", String.valueOf(0xFF70D6FF)});
+            }
+            return list;
+        }
+
+        @Override protected void measure(MinecraftClient mc) {
+            List<String[]> list = rows(mc, ArtemConfig.get());
+            if (list.isEmpty()) { width = 0; height = 0; return; }
+            int maxW = 94;
+            for (String[] r : list) {
+                maxW = Math.max(maxW, 20 + mc.textRenderer.getWidth(r[0]) + mc.textRenderer.getWidth(r[1]));
+            }
+            width = maxW;
+            height = 16 + list.size() * 10;
+        }
+
+        @Override protected void renderBody(DrawContext ctx, MinecraftClient mc, ArtemConfig c, int x, int y) {
+            List<String[]> list = rows(mc, c);
+            if (list.isEmpty()) return;
+            int accB = NeonButton.getHudAccentBright(0);
+            NeonButton.fillGradientRounded(ctx, x, y, width, height, 5, NeonButton.HUD_BG_TOP, NeonButton.HUD_BG_BOTTOM);
+            NeonButton.drawSmoothRoundedOutline(ctx, x, y, width, height, 5, glassBorder());
+            NeonButton.fillSmoothRounded(ctx, x + 5, y + 4, 4, 5, 1, accB);
+            ctx.drawText(mc.textRenderer, "Potion effects", x + 12, y + 3, 0xFFEAEAF6, false);
+            int ry = y + 15;
+            for (String[] r : list) {
+                NeonButton.drawCircle(ctx, x + 6, ry + 3, 2, Integer.parseInt(r[2]));
+                ctx.drawText(mc.textRenderer, r[0], x + 11, ry, 0xFFE6E6F2, false);
+                ctx.drawText(mc.textRenderer, r[1], x + width - mc.textRenderer.getWidth(r[1]) - 5, ry, 0xFF9A9AB2, false);
+                ry += 10;
+            }
+        }
+        @Override protected int defaultX() { return 6; }
+        @Override protected int defaultY() { return 52; }
+    }
+
+    // 4. Keybinds (слева по центру, под эффектами)
     static class HotKeysElement extends HudElement {
         HotKeysElement() { super("hotkeys"); }
         @Override public boolean isEnabled(ArtemConfig c) { return c.showHotKeys; }
-        @Override public String getText(MinecraftClient mc) { return "Hot Keys"; }
+        @Override public String getText(MinecraftClient mc) { return "Keybinds"; }
         @Override public int getColor(MinecraftClient mc) { return NeonButton.getHudAccentBright(0); }
 
         private List<String[]> binds(ArtemConfig c) {
             List<String[]> list = new ArrayList<>();
             list.add(new String[]{"ClickGUI", "RSHIFT"});
-            if (c.smallSword) list.add(new String[]{"SmallSword", "ON"});
-            if (c.targetEsp) list.add(new String[]{"TargetESP", "ON"});
-            if (c.jumpCircle) list.add(new String[]{"JumpCircle", "ON"});
+            list.add(new String[]{"Zoom", "C"});
+            for (Map.Entry<String, Integer> e : c.keybinds.entrySet()) {
+                if (e.getValue() != null && e.getValue() > 0) {
+                    String keyName = InputUtil.Type.KEYSYM.createFromCode(e.getValue()).getLocalizedText().getString().toUpperCase();
+                    list.add(new String[]{e.getKey(), keyName});
+                }
+            }
             return list;
         }
 
-        @Override protected void measure(MinecraftClient mc) { width = 88; height = 14 + Math.min(3, binds(ArtemConfig.get()).size()) * 9; }
+        @Override protected void measure(MinecraftClient mc) {
+            int rows = Math.min(4, binds(ArtemConfig.get()).size());
+            width = 94;
+            height = 16 + rows * 10;
+        }
 
         @Override protected void renderBody(DrawContext ctx, MinecraftClient mc, ArtemConfig c, int x, int y) {
             List<String[]> list = binds(c);
             int accB = NeonButton.getHudAccentBright(0);
-            NeonButton.fillGradientRounded(ctx, x, y, width, height, 4, NeonButton.HUD_BG_TOP, NeonButton.HUD_BG_BOTTOM);
-            NeonButton.drawSmoothRoundedOutline(ctx, x, y, width, height, 4, hudBorder());
+            NeonButton.fillGradientRounded(ctx, x, y, width, height, 5, NeonButton.HUD_BG_TOP, NeonButton.HUD_BG_BOTTOM);
+            NeonButton.drawSmoothRoundedOutline(ctx, x, y, width, height, 5, glassBorder());
             NeonButton.fillSmoothRounded(ctx, x + 5, y + 4, 5, 5, 1, accB);
-            ctx.drawText(mc.textRenderer, "Hot Keys", x + 13, y + 3, 0xFFE8E8F4, false);
-            int ry = y + 14;
-            for (int i = 0; i < Math.min(3, list.size()); i++) {
+            ctx.drawText(mc.textRenderer, "Keybinds", x + 13, y + 3, 0xFFEAEAF6, false);
+            int ry = y + 15;
+            for (int i = 0; i < Math.min(4, list.size()); i++) {
                 String[] b = list.get(i);
-                ctx.drawText(mc.textRenderer, b[0], x + 5, ry, 0xFFCCCCE0, false);
-                ctx.drawText(mc.textRenderer, b[1], x + width - mc.textRenderer.getWidth(b[1]) - 5, ry, accB, false);
-                ry += 9;
+                ctx.drawText(mc.textRenderer, b[0], x + 5, ry, 0xFFD4D4E6, false);
+                ctx.drawText(mc.textRenderer, b[1], x + width - mc.textRenderer.getWidth(b[1]) - 5, ry, 0xFF9A9AB2, false);
+                ry += 10;
             }
         }
-        @Override protected int defaultX() { return 5; }
-        @Override protected int defaultY() { return 5; }
+        @Override protected int defaultX() { return 6; }
+        @Override protected int defaultY() { return 96; }
     }
 
+    // 5. Мини-моделька игрока в левом нижнем углу (Paperdoll)
+    static class PaperdollElement extends HudElement {
+        PaperdollElement() { super("paperdoll"); }
+        @Override public boolean isEnabled(ArtemConfig c) { return c.showPaperdoll; }
+        @Override public String getText(MinecraftClient mc) { return "Player"; }
+        @Override public int getColor(MinecraftClient mc) { return NeonButton.getHudAccentBright(0); }
+        @Override protected void measure(MinecraftClient mc) { width = 38; height = 52; }
+
+        @Override protected void renderBody(DrawContext ctx, MinecraftClient mc, ArtemConfig c, int x, int y) {
+            if (mc.player == null) return;
+            if (c.hudEditMode) {
+                NeonButton.fillGradientRounded(ctx, x, y, width, height, 5, NeonButton.HUD_BG_TOP, NeonButton.HUD_BG_BOTTOM);
+            }
+            try {
+                InventoryScreen.drawEntity(
+                        ctx,
+                        x, y,
+                        x + width, y + height,
+                        22,
+                        0.0625f,
+                        (float) (x + width / 2.0f - 14.0f),
+                        (float) (y + 12.0f),
+                        mc.player
+                );
+            } catch (Throwable ignored) {
+            }
+        }
+
+        @Override protected int defaultX() { return 6; }
+        @Override protected int defaultY() { return Math.max(120, screenH() - 56); }
+    }
+
+    // 6. TargetHUD (в верхнем правом углу, не перекрывает TopBar)
     static class TargetHudElement extends HudElement {
         private float smoothHp = 20f;
         TargetHudElement() { super("target"); }
@@ -345,7 +519,7 @@ public final class HudManager {
 
         @Override protected void measure(MinecraftClient mc) {
             if (target(mc, ArtemConfig.get()) == null) { width = 0; height = 0; return; }
-            width = 98; height = 23;
+            width = 104; height = 25;
         }
 
         @Override protected void renderBody(DrawContext ctx, MinecraftClient mc, ArtemConfig c, int x, int y) {
@@ -358,9 +532,9 @@ public final class HudManager {
             int acc = NeonButton.getHudAccent(0);
             int accB = NeonButton.getHudAccentBright(0);
 
-            NeonButton.fillGradientRounded(ctx, x, y, width, height, 4, NeonButton.HUD_BG_TOP, NeonButton.HUD_BG_BOTTOM);
-            NeonButton.drawSmoothRoundedOutline(ctx, x, y, width, height, 4, hudBorder());
-            int ax = x + 3, ay = y + 3, av = 17;
+            NeonButton.fillGradientRounded(ctx, x, y, width, height, 5, NeonButton.HUD_BG_TOP, NeonButton.HUD_BG_BOTTOM);
+            NeonButton.drawSmoothRoundedOutline(ctx, x, y, width, height, 5, glassBorder());
+            int ax = x + 3, ay = y + 3, av = 19;
             NeonButton.fillSmoothRounded(ctx, ax, ay, av, av, 3, 0xFF1A1A28);
 
             String name = t.getName().getString();
@@ -370,92 +544,87 @@ public final class HudManager {
                 String ini = name.isEmpty() ? "?" : name.substring(0, 1).toUpperCase();
                 ctx.drawText(mc.textRenderer, ini, ax + 6, ay + 5, accB, false);
             }
-            if (name.length() > 11) name = name.substring(0, 10) + "…";
+            if (name.length() > 12) name = name.substring(0, 11) + "…";
             int tx = ax + av + 5;
             ctx.drawText(mc.textRenderer, name, tx, y + 3, 0xFFF2F2FA, false);
-            ctx.drawText(mc.textRenderer, String.format("%.1f HP", hp), tx, y + 11, accB, false);
+            ctx.drawText(mc.textRenderer, String.format("%.1f HP", hp), tx, y + 12, accB, false);
 
             int barW = width - (tx - x) - 4;
-            NeonButton.fillSmoothRounded(ctx, tx, y + 19, barW, 2, 1, 0xFF222232);
+            NeonButton.fillSmoothRounded(ctx, tx, y + 21, barW, 2, 1, 0xFF222232);
             int fillW = Math.round(barW * ratio);
-            if (fillW > 1) NeonButton.fillGradientRounded(ctx, tx, y + 19, fillW, 2, 1, acc, accB);
+            if (fillW > 1) NeonButton.fillGradientRounded(ctx, tx, y + 21, fillW, 2, 1, acc, accB);
         }
-        @Override protected int defaultX() { return Math.max(6, screenW() - 80); }
-        @Override protected int defaultY() { return 5; }
+        @Override protected int defaultX() {
+            int scaledW = Math.round(104 * ArtemConfig.get().hudScale);
+            return Math.max(6, screenW() - scaledW - 6);
+        }
+        @Override protected int defaultY() { return 6; }
     }
 
-    static class PotionsElement extends HudElement {
-        PotionsElement() { super("potions"); }
-        @Override public boolean isEnabled(ArtemConfig c) { return c.showPotions; }
-        @Override public String getText(MinecraftClient mc) { return "Potions"; }
-        @Override public int getColor(MinecraftClient mc) { return NeonButton.getHudAccentBright(0); }
-
-        private List<String[]> rows(MinecraftClient mc, ArtemConfig c) {
-            List<String[]> list = new ArrayList<>();
-            if (mc.player != null) {
-                for (StatusEffectInstance inst : mc.player.getStatusEffects()) {
-                    String name = inst.getEffectType().value().getName().getString();
-                    int amp = inst.getAmplifier();
-                    if (amp == 1) name += " II"; else if (amp >= 2) name += " " + (amp + 1);
-                    String time = (inst.isInfinite() || inst.getDuration() < 0) ? "∞"
-                            : String.format("%d:%02d", (inst.getDuration() / 20) / 60, (inst.getDuration() / 20) % 60);
-                    list.add(new String[]{name, time, String.valueOf(0xFF000000 | inst.getEffectType().value().getColor())});
-                }
-            }
-            if (list.isEmpty() && c.hudEditMode) {
-                list.add(new String[]{"Strength II", "2:19", String.valueOf(0xFFFF5E7E)});
-                list.add(new String[]{"Speed II", "2:18", String.valueOf(0xFF70D6FF)});
-            }
-            return list;
-        }
-
-        @Override protected void measure(MinecraftClient mc) {
-            List<String[]> list = rows(mc, ArtemConfig.get());
-            if (list.isEmpty()) { width = 0; height = 0; return; }
-            int maxW = 88;
-            for (String[] r : list) maxW = Math.max(maxW, 20 + mc.textRenderer.getWidth(r[0]) + mc.textRenderer.getWidth(r[1]));
-            width = maxW; height = 14 + list.size() * 9;
-        }
-
-        @Override protected void renderBody(DrawContext ctx, MinecraftClient mc, ArtemConfig c, int x, int y) {
-            List<String[]> list = rows(mc, c);
-            if (list.isEmpty()) return;
-            int accB = NeonButton.getHudAccentBright(0);
-            NeonButton.fillGradientRounded(ctx, x, y, width, height, 4, NeonButton.HUD_BG_TOP, NeonButton.HUD_BG_BOTTOM);
-            NeonButton.drawSmoothRoundedOutline(ctx, x, y, width, height, 4, hudBorder());
-            NeonButton.fillSmoothRounded(ctx, x + 5, y + 4, 4, 5, 1, accB);
-            ctx.drawText(mc.textRenderer, "Potions", x + 12, y + 3, 0xFFE8E8F4, false);
-            int ry = y + 14;
-            for (String[] r : list) {
-                NeonButton.drawCircle(ctx, x + 6, ry + 3, 2, Integer.parseInt(r[2]));
-                ctx.drawText(mc.textRenderer, r[0], x + 11, ry, 0xFFE6E6F2, false);
-                ctx.drawText(mc.textRenderer, r[1], x + width - mc.textRenderer.getWidth(r[1]) - 5, ry, accB, false);
-                ry += 9;
-            }
-        }
-        @Override protected int defaultX() { return 5; }
-        @Override protected int defaultY() { return 48; }
-    }
-
+    // 7. Броня с реальной полоской прочности и правильным порядком слотов
     static class ArmorElement extends HudElement {
         ArmorElement() { super("armor"); }
         @Override public boolean isEnabled(ArtemConfig c) { return c.showArmor; }
         @Override public String getText(MinecraftClient mc) { return "Armor"; }
         @Override public int getColor(MinecraftClient mc) { return NeonButton.getHudAccentBright(0); }
-        @Override protected void measure(MinecraftClient mc) { width = 68; height = 18; }
+
+        @Override protected void measure(MinecraftClient mc) {
+            if (mc.player == null) { width = 0; height = 0; return; }
+            int count = 0;
+            for (int s = 3; s >= 0; s--) {
+                if (!mc.player.getInventory().getArmorStack(s).isEmpty()) count++;
+            }
+            if (count == 0 && !ArtemConfig.get().hudEditMode) {
+                width = 0;
+                height = 0;
+                return;
+            }
+            int slots = Math.max(1, count);
+            width = 6 + slots * 18;
+            height = ArtemConfig.get().armorDurabilityPercent ? 26 : 21;
+        }
 
         @Override protected void renderBody(DrawContext ctx, MinecraftClient mc, ArtemConfig c, int x, int y) {
             if (mc.player == null) return;
-            boolean any = false;
-            for (ItemStack st : mc.player.getArmorItems()) if (!st.isEmpty()) { any = true; break; }
-            if (!any && !c.hudEditMode) return;
+            List<ItemStack> pieces = new ArrayList<>(4);
+            for (int s = 3; s >= 0; s--) {
+                ItemStack st = mc.player.getInventory().getArmorStack(s);
+                if (!st.isEmpty()) pieces.add(st);
+            }
+            if (pieces.isEmpty()) {
+                if (!c.hudEditMode) return;
+                NeonButton.fillGradientRounded(ctx, x, y, width, height, 4, NeonButton.HUD_BG_TOP, NeonButton.HUD_BG_BOTTOM);
+                NeonButton.drawSmoothRoundedOutline(ctx, x, y, width, height, 4, glassBorder());
+                ctx.drawText(mc.textRenderer, "ARM", x + 4, y + 6, 0xFF9A9AB2, false);
+                return;
+            }
+
             NeonButton.fillGradientRounded(ctx, x, y, width, height, 4, NeonButton.HUD_BG_TOP, NeonButton.HUD_BG_BOTTOM);
-            NeonButton.drawSmoothRoundedOutline(ctx, x, y, width, height, 4, hudBorder());
-            int ix = x + width - 17;
-            for (ItemStack st : mc.player.getArmorItems()) { if (!st.isEmpty()) ctx.drawItem(st, ix, y + 1); ix -= 16; }
+            NeonButton.drawSmoothRoundedOutline(ctx, x, y, width, height, 4, glassBorder());
+
+            int ix = x + 4;
+            for (ItemStack st : pieces) {
+                ctx.drawItem(st, ix, y + 1);
+                ctx.drawItemInSlot(mc.textRenderer, st, ix, y + 1);
+
+                if (st.isDamageable() && st.getMaxDamage() > 0) {
+                    float ratio = Math.max(0f, Math.min(1f, (st.getMaxDamage() - st.getDamage()) / (float) st.getMaxDamage()));
+                    int durCol = 0xFF000000 | (Color.HSBtoRGB(ratio / 3.0f, 0.85f, 0.96f) & 0x00FFFFFF);
+                    int bw = Math.max(1, Math.round(14 * ratio));
+                    ctx.fill(ix + 1, y + 17, ix + 15, y + 19, 0xCC0A0A12);
+                    ctx.fill(ix + 1, y + 17, ix + 1 + bw, y + 19, durCol);
+
+                    if (c.armorDurabilityPercent) {
+                        String pct = Math.round(ratio * 100f) + "%";
+                        NeonButton.drawSmallText(ctx, mc.textRenderer, pct, ix + 1, y + 20, durCol, 0.65f);
+                    }
+                }
+                ix += 18;
+            }
         }
-        @Override protected int defaultX() { return screenW() / 2 + 94; }
-        @Override protected int defaultY() { return screenH() - 20; }
+
+        @Override protected int defaultX() { return screenW() / 2 + 95; }
+        @Override protected int defaultY() { return screenH() - 22; }
     }
 
     static class ArrayListElement extends HudElement {
@@ -493,7 +662,7 @@ public final class HudManager {
             }
         }
         @Override protected int defaultX() { return screenW() - 75; }
-        @Override protected int defaultY() { return 32; }
+        @Override protected int defaultY() { return 36; }
     }
 
     static class FpsElement extends HudElement {
@@ -501,7 +670,7 @@ public final class HudManager {
         @Override public boolean isEnabled(ArtemConfig c) { return c.showFps; }
         @Override public String getText(MinecraftClient mc) { return "FPS " + mc.getCurrentFps(); }
         @Override public int getColor(MinecraftClient mc) { return NeonButton.getHudAccentBright(0); }
-        @Override protected int defaultX() { return 5; } @Override protected int defaultY() { return 86; }
+        @Override protected int defaultX() { return 6; } @Override protected int defaultY() { return 144; }
     }
 
     static class PingElement extends HudElement {
@@ -509,7 +678,7 @@ public final class HudManager {
         @Override public boolean isEnabled(ArtemConfig c) { return c.showPing; }
         @Override public String getText(MinecraftClient mc) { int p = queryPing(mc); return "PING " + (p >= 0 ? p : 0) + "ms"; }
         @Override public int getColor(MinecraftClient mc) { return NeonButton.getHudAccentBright(100); }
-        @Override protected int defaultX() { return 52; } @Override protected int defaultY() { return 86; }
+        @Override protected int defaultX() { return 54; } @Override protected int defaultY() { return 144; }
     }
 
     static class XyzElement extends HudElement {
@@ -521,7 +690,7 @@ public final class HudManager {
             return String.format("XYZ %d %d %d", p.getX(), p.getY(), p.getZ());
         }
         @Override public int getColor(MinecraftClient mc) { return NeonButton.getHudAccentBright(200); }
-        @Override protected int defaultX() { return 5; } @Override protected int defaultY() { return 100; }
+        @Override protected int defaultX() { return 6; } @Override protected int defaultY() { return 158; }
     }
 
     static class SpeedElement extends HudElement {
@@ -532,7 +701,7 @@ public final class HudManager {
             return String.format("BPS %.2f", Math.hypot(mc.player.getX() - mc.player.prevX, mc.player.getZ() - mc.player.prevZ) * 20.0);
         }
         @Override public int getColor(MinecraftClient mc) { return NeonButton.getHudAccentBright(300); }
-        @Override protected int defaultX() { return 5; } @Override protected int defaultY() { return 114; }
+        @Override protected int defaultX() { return 6; } @Override protected int defaultY() { return 172; }
     }
 
     static class CpsElement extends HudElement {
@@ -540,7 +709,7 @@ public final class HudManager {
         @Override public boolean isEnabled(ArtemConfig c) { return c.showCps; }
         @Override public String getText(MinecraftClient mc) { return "CPS " + currentLmbCps() + "|" + currentRmbCps(); }
         @Override public int getColor(MinecraftClient mc) { return NeonButton.getHudAccentBright(400); }
-        @Override protected int defaultX() { return 62; } @Override protected int defaultY() { return 114; }
+        @Override protected int defaultX() { return 64; } @Override protected int defaultY() { return 172; }
     }
 
     static class HealthElement extends HudElement {
@@ -548,7 +717,7 @@ public final class HudManager {
         @Override public boolean isEnabled(ArtemConfig c) { return c.showHealthHud; }
         @Override public String getText(MinecraftClient mc) { return mc.player == null ? "HP 20.0" : String.format("HP %.1f", mc.player.getHealth()); }
         @Override public int getColor(MinecraftClient mc) { return NeonButton.getHudAccentBright(500); }
-        @Override protected int defaultX() { return 5; } @Override protected int defaultY() { return 128; }
+        @Override protected int defaultX() { return 6; } @Override protected int defaultY() { return 186; }
     }
 
     static class HungerElement extends HudElement {
@@ -556,7 +725,7 @@ public final class HudManager {
         @Override public boolean isEnabled(ArtemConfig c) { return c.showHungerHud; }
         @Override public String getText(MinecraftClient mc) { return mc.player == null ? "FOOD 20" : "FOOD " + mc.player.getHungerManager().getFoodLevel(); }
         @Override public int getColor(MinecraftClient mc) { return NeonButton.getHudAccentBright(600); }
-        @Override protected int defaultX() { return 54; } @Override protected int defaultY() { return 128; }
+        @Override protected int defaultX() { return 56; } @Override protected int defaultY() { return 186; }
     }
 
     static class DirectionElement extends HudElement {
@@ -568,7 +737,7 @@ public final class HudManager {
             return "DIR " + dirs[Math.round(((MathHelper.wrapDegrees(mc.player.getYaw()) + 360f) % 360f) / 45f) % 8];
         }
         @Override public int getColor(MinecraftClient mc) { return NeonButton.getHudAccentBright(700); }
-        @Override protected int defaultX() { return 104; } @Override protected int defaultY() { return 128; }
+        @Override protected int defaultX() { return 106; } @Override protected int defaultY() { return 186; }
     }
 
     static class NicknameElement extends HudElement {
@@ -576,7 +745,7 @@ public final class HudManager {
         @Override public boolean isEnabled(ArtemConfig c) { return c.showNickname; }
         @Override public String getText(MinecraftClient mc) { return "USER " + (mc.player != null ? mc.player.getName().getString() : "Player"); }
         @Override public int getColor(MinecraftClient mc) { return NeonButton.getHudAccentBright(800); }
-        @Override protected int defaultX() { return 62; } @Override protected int defaultY() { return 142; }
+        @Override protected int defaultX() { return 64; } @Override protected int defaultY() { return 200; }
     }
 
     static class PlaytimeElement extends HudElement {
@@ -587,7 +756,7 @@ public final class HudManager {
             return String.format("TIME %02d:%02d", sec / 60, sec % 60);
         }
         @Override public int getColor(MinecraftClient mc) { return NeonButton.getHudAccentBright(900); }
-        @Override protected int defaultX() { return 62; } @Override protected int defaultY() { return 156; }
+        @Override protected int defaultX() { return 64; } @Override protected int defaultY() { return 214; }
     }
 
     private static void drawKeyBox(DrawContext ctx, MinecraftClient mc, int kx, int ky, int kw, int kh, String label, boolean on) {
@@ -598,7 +767,7 @@ public final class HudManager {
             NeonButton.drawSmoothRoundedOutline(ctx, kx, ky, kw, kh, 3, 0x88FFFFFF);
         } else {
             NeonButton.fillGradientRounded(ctx, kx, ky, kw, kh, 3, NeonButton.HUD_BG_TOP, NeonButton.HUD_BG_BOTTOM);
-            NeonButton.drawSmoothRoundedOutline(ctx, kx, ky, kw, kh, 3, hudBorder());
+            NeonButton.drawSmoothRoundedOutline(ctx, kx, ky, kw, kh, 3, 0x22FFFFFF);
         }
         NeonButton.drawSmallText(ctx, mc.textRenderer, label,
                 kx + (kw - mc.textRenderer.getWidth(label) * 0.85f) / 2f,
@@ -621,7 +790,7 @@ public final class HudManager {
             drawKeyBox(ctx, mc, x + ks + g, y + ks + g, ks, ks, "S", mc.options.backKey.isPressed());
             drawKeyBox(ctx, mc, x + (ks + g) * 2, y + ks + g, ks, ks, "D", mc.options.rightKey.isPressed());
         }
-        @Override protected int defaultX() { return 5; } @Override protected int defaultY() { return screenH() - 32; }
+        @Override protected int defaultX() { return 52; } @Override protected int defaultY() { return screenH() - 34; }
     }
 
     static class KeystrokesElement extends HudElement {
@@ -643,7 +812,7 @@ public final class HudManager {
             drawKeyBox(ctx, mc, x + 26, r3, 24, 10, "RMB", mc.options.useKey.isPressed());
             drawKeyBox(ctx, mc, x, r3 + 12, 50, 9, "SPACE", mc.options.jumpKey.isPressed());
         }
-        @Override protected int defaultX() { return 5; } @Override protected int defaultY() { return screenH() - 50; }
+        @Override protected int defaultX() { return 52; } @Override protected int defaultY() { return screenH() - 54; }
     }
 
     static class RadarElement extends HudElement {
@@ -656,49 +825,7 @@ public final class HudManager {
         @Override protected void renderBody(DrawContext ctx, MinecraftClient mc, ArtemConfig c, int x, int y) {
             int accB = NeonButton.getHudAccentBright(0);
             NeonButton.fillGradientRounded(ctx, x, y, width, height, 5, NeonButton.HUD_BG_TOP, NeonButton.HUD_BG_BOTTOM);
-            NeonButton.drawSmoothRoundedOutline(ctx, x, y, width, height, 5, hudBorder());
+            NeonButton.drawSmoothRoundedOutline(ctx, x, y, width, height, 5, glassBorder());
             int cx = x + width / 2, cy = y + height / 2;
             ctx.fill(cx, y + 3, cx + 1, y + height - 3, 0x18FFFFFF);
-            ctx.fill(x + 3, cy, x + width - 3, cy + 1, 0x18FFFFFF);
-            NeonButton.drawCircle(ctx, cx, cy, 1, 0xFFFFFFFF);
-            if (mc.world == null || mc.player == null) return;
-            double rad = Math.toRadians(mc.player.getYaw() + 180.0), cos = Math.cos(rad), sin = Math.sin(rad);
-            for (Entity e : mc.world.getEntities()) {
-                if (e == mc.player) continue;
-                double dx = e.getX() - mc.player.getX(), dz = e.getZ() - mc.player.getZ();
-                if (dx * dx + dz * dz > 48 * 48) continue;
-                int px = MathHelper.clamp((int) Math.round(cx + (dx * cos - dz * sin) * 0.40), x + 3, x + width - 4);
-                int py = MathHelper.clamp((int) Math.round(cy + (dx * sin + dz * cos) * 0.40), y + 3, y + height - 4);
-                int col = (e instanceof PlayerEntity) ? accB : (e instanceof MobEntity) ? 0xFFFFB703 : (e instanceof ItemEntity) ? 0xFF00F5FF : 0;
-                if (col != 0) NeonButton.drawCircle(ctx, px, py, 1, col);
-            }
-        }
-        @Override protected int defaultX() { return screenW() - 44; } @Override protected int defaultY() { return screenH() - 44; }
-    }
-
-    static class MinimapElement extends HudElement {
-        MinimapElement() { super("minimap"); }
-        @Override public boolean isEnabled(ArtemConfig c) { return c.showMinimap; }
-        @Override public String getText(MinecraftClient mc) { return "MiniMap"; }
-        @Override public int getColor(MinecraftClient mc) { return NeonButton.getHudAccent(0); }
-        @Override protected void measure(MinecraftClient mc) { width = 52; height = 52; }
-
-        @Override protected void renderBody(DrawContext ctx, MinecraftClient mc, ArtemConfig c, int x, int y) {
-            int accB = NeonButton.getHudAccentBright(0);
-            NeonButton.fillGradientRounded(ctx, x, y, width, height, 5, NeonButton.HUD_BG_TOP, NeonButton.HUD_BG_BOTTOM);
-            NeonButton.drawSmoothRoundedOutline(ctx, x, y, width, height, 5, hudBorder());
-            int ox = x + 2, oy = y + 2;
-            for (int rz = 0; rz < MAP_SIZE; rz++) {
-                for (int rx = 0; rx < MAP_SIZE; rx++) {
-                    int col = MINIMAP_COLORS[rz][rx];
-                    if (col != 0) ctx.fill(ox + rx * 2, oy + rz * 2, ox + (rx + 1) * 2, oy + (rz + 1) * 2, col);
-                }
-            }
-            int cx = x + width / 2, cy = y + height / 2;
-            NeonButton.drawCircle(ctx, cx, cy, 2, accB);
-            NeonButton.drawCircle(ctx, cx, cy, 1, 0xFFFFFFFF);
-            ctx.drawText(mc.textRenderer, "N", cx - 2, y + 3, accB, false);
-        }
-        @Override protected int defaultX() { return screenW() - 94; } @Override protected int defaultY() { return screenH() - 46; }
-    }
-}
+            ctx.fill(x
