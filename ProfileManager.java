@@ -4,107 +4,86 @@ import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import net.fabricmc.loader.api.FabricLoader;
 
-import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
-import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 /**
- * Профили настроек в config/artemvisuals/profiles/*.json
+ * Менеджер профилей ARTEM VISUALS 3.0 (включая профиль FunTime).
  */
 public final class ProfileManager {
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
-    private static final Path DIR = FabricLoader.getInstance().getConfigDir()
-            .resolve("artemvisuals").resolve("profiles");
+    private static final Path DIR = FabricLoader.getInstance().getConfigDir().resolve("artemvisuals_profiles");
 
     private ProfileManager() {}
 
-    public static List<String> listProfiles() {
+    public static boolean saveProfile(String rawName) {
+        String name = sanitize(rawName);
+        if (name.isEmpty()) return false;
         try {
             Files.createDirectories(DIR);
-            try (Stream<Path> s = Files.list(DIR)) {
-                return s.filter(p -> p.toString().endsWith(".json"))
-                        .map(p -> p.getFileName().toString().replace(".json", ""))
-                        .sorted()
-                        .collect(Collectors.toList());
-            }
-        } catch (IOException e) {
-            return new ArrayList<>();
-        }
-    }
-
-    public static boolean saveProfile(String name) {
-        if (name == null || name.isBlank()) return false;
-        String safe = name.replaceAll("[^a-zA-Z0-9_\\-а-яА-ЯёЁ ]", "").trim();
-        if (safe.isEmpty()) return false;
-        try {
-            Files.createDirectories(DIR);
-            Path file = DIR.resolve(safe + ".json");
-            Files.writeString(file, GSON.toJson(ArtemConfig.get()));
-            return true;
-        } catch (IOException e) {
-            System.err.println("[ArtemVisuals] Ошибка сохранения профиля: " + e);
-            return false;
-        }
-    }
-
-    public static boolean loadProfile(String name) {
-        Path file = DIR.resolve(name + ".json");
-        if (!Files.exists(file)) return false;
-        try {
-            ArtemConfig loaded = GSON.fromJson(Files.readString(file), ArtemConfig.class);
-            if (loaded == null) return false;
-            // Копируем поля в текущий инстанс
-            ArtemConfig cur = ArtemConfig.get();
-            copy(loaded, cur);
-            cur.save();
+            Path file = DIR.resolve(name + ".json");
+            Files.writeString(file, GSON.toJson(ArtemConfig.get()), StandardCharsets.UTF_8);
             return true;
         } catch (Exception e) {
-            System.err.println("[ArtemVisuals] Ошибка загрузки профиля: " + e);
             return false;
         }
     }
 
-    public static boolean deleteProfile(String name) {
+    public static boolean loadProfile(String rawName) {
+        String name = sanitize(rawName);
+        if (name.isEmpty()) return false;
+        try {
+            Path file = DIR.resolve(name + ".json");
+            if (!Files.exists(file)) return false;
+            String json = Files.readString(file, StandardCharsets.UTF_8);
+            ArtemConfig loaded = GSON.fromJson(json, ArtemConfig.class);
+            if (loaded == null) return false;
+            ArtemConfig.replaceInstance(loaded);
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    public static boolean deleteProfile(String rawName) {
+        String name = sanitize(rawName);
+        if (name.isEmpty()) return false;
         try {
             return Files.deleteIfExists(DIR.resolve(name + ".json"));
-        } catch (IOException e) {
+        } catch (Exception e) {
             return false;
         }
     }
 
-    private static void copy(ArtemConfig from, ArtemConfig to) {
-        to.masterEnabled = from.masterEnabled;
-        to.leafParticles = from.leafParticles;
-        to.precipitationEffects = from.precipitationEffects;
-        to.waterSparkles = from.waterSparkles;
-        to.fireflies = from.fireflies;
-        to.blockBreakEffects = from.blockBreakEffects;
-        to.softLighting = from.softLighting;
-        to.smoothLighting = from.smoothLighting;
-        to.density = from.density;
-        to.radius = from.radius;
-        to.lightingLevel = from.lightingLevel;
-        to.adaptive = from.adaptive;
-        to.adaptiveThreshold = from.adaptiveThreshold;
-        to.showFps = from.showFps;
-        to.showPing = from.showPing;
-        to.showXyz = from.showXyz;
-        to.showCps = from.showCps;
-        to.showWasd = from.showWasd;
-        to.showServer = from.showServer;
-        to.hudPositions = from.hudPositions != null ? new java.util.HashMap<>(from.hudPositions) : new java.util.HashMap<>();
-        to.customCrosshair = from.customCrosshair;
-        to.crosshairStyle = from.crosshairStyle;
-        to.crosshairColor = from.crosshairColor;
-        to.crosshairSize = from.crosshairSize;
-        to.crosshairGap = from.crosshairGap;
-        to.crosshairThickness = from.crosshairThickness;
-        to.crosshairOutline = from.crosshairOutline;
-        to.crosshairDynamic = from.crosshairDynamic;
-        // backup / gamma не трогаем при загрузке профиля
+    public static boolean exists(String rawName) {
+        String name = sanitize(rawName);
+        if (name.isEmpty()) return false;
+        return Files.exists(DIR.resolve(name + ".json"));
+    }
+
+    public static List<String> listProfiles() {
+        List<String> out = new ArrayList<>();
+        try {
+            if (!Files.exists(DIR)) return out;
+            try (Stream<Path> s = Files.list(DIR)) {
+                s.filter(p -> p.toString().endsWith(".json")).forEach(p -> {
+                    String fn = p.getFileName().toString();
+                    out.add(fn.substring(0, fn.length() - 5));
+                });
+            }
+            Collections.sort(out);
+        } catch (Exception ignored) {
+        }
+        return out;
+    }
+
+    private static String sanitize(String s) {
+        if (s == null) return "";
+        return s.trim().replaceAll("[^a-zA-Zа-яА-Я0-9_\\- ]", "");
     }
 }
