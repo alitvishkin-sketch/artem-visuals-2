@@ -3,6 +3,7 @@ package com.artem.visuals.effects;
 import com.artem.visuals.config.ArtemConfig;
 import net.fabricmc.fabric.api.client.rendering.v1.WorldRenderContext;
 import net.fabricmc.fabric.api.client.rendering.v1.WorldRenderEvents;
+import net.fabricmc.fabric.api.event.player.AttackEntityCallback;
 import net.fabricmc.fabric.api.event.player.PlayerBlockBreakEvents;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.LeavesBlock;
@@ -12,8 +13,10 @@ import net.minecraft.client.render.VertexConsumer;
 import net.minecraft.client.render.VertexConsumerProvider;
 import net.minecraft.client.render.WorldRenderer;
 import net.minecraft.client.util.math.MatrixStack;
+import net.minecraft.entity.LivingEntity;
 import net.minecraft.particle.ParticleTypes;
 import net.minecraft.registry.tag.FluidTags;
+import net.minecraft.util.ActionResult;
 import net.minecraft.util.hit.BlockHitResult;
 import net.minecraft.util.hit.HitResult;
 import net.minecraft.util.math.BlockPos;
@@ -23,26 +26,44 @@ import net.minecraft.util.shape.VoxelShape;
 
 import java.util.ArrayList;
 import java.util.Iterator;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Random;
 
 /**
- * Настоящий 3D-рендер мира в стиле PulseVisuals / FunTime:
- * - Многослойный светящийся 3D Jump Circle со звёздами прямо на земле
- * - Двойной неоновый 3D Block Overlay по точной форме блока
- * - Частицы окружения
+ * Все 3D-визуалы и эффекты PulseVisuals:
+ * Nimb, Trails, Target ESP, Jump Circle, Block Overlay, Hit Particles, World Customizer, Render Tweaks.
  */
 public final class EffectManager {
+    public static boolean nimb = true;
+    public static int nimbColor = 0xFF6C5CE7;
+
+    public static boolean trails = true;
+    public static int trailLength = 24;
+    public static int trailColor = 0xFF6C5CE7;
+
+    public static boolean targetEsp = true;
+    public static int targetEspColor = 0xFF6C5CE7;
+
     public static boolean jumpCircle = true;
     public static float jumpCircleRadius = 1.2f;
-    public static int jumpCircleColor = 0xFFFFD166;
+    public static int jumpCircleColor = 0xFF6C5CE7;
 
     public static boolean blockOverlay = true;
     public static float blockOverlayAlpha = 0.85f;
-    public static int blockOverlayColor = 0xFFFFD166;
+    public static int blockOverlayColor = 0xFF6C5CE7;
+
+    public static boolean hitParticles = true;
+    public static boolean renderTweaks = true;
+    public static boolean motionBlur = false;
+
+    public static boolean worldCustomizer = true;
+    public static int worldTimeMode = 0; // 0 = Сервер, 1 = День, 2 = Закат, 3 = Ночь
+    public static boolean skyTint = true;
 
     private static final Random RNG = new Random();
     private static final List<JumpRing> RINGS = new ArrayList<>();
+    private static final LinkedList<Vec3d> TRAIL_POINTS = new LinkedList<>();
     private static boolean wasOnGround = true;
 
     private record JumpRing(double x, double y, double z, long createdMs, float maxRadius, int color) {}
@@ -51,6 +72,22 @@ public final class EffectManager {
 
     public static void registerEvents() {
         WorldRenderEvents.AFTER_TRANSLUCENT.register(EffectManager::onWorldRender);
+
+        AttackEntityCallback.EVENT.register((player, world, hand, entity, hitResult) -> {
+            if (world != null && world.isClient && hitParticles && entity != null) {
+                for (int i = 0; i < 14; i++) {
+                    double ox = entity.getX() + (RNG.nextDouble() - 0.5) * 0.9;
+                    double oy = entity.getY() + 0.5 + RNG.nextDouble() * entity.getHeight() * 0.7;
+                    double oz = entity.getZ() + (RNG.nextDouble() - 0.5) * 0.9;
+                    world.addParticle(i % 2 == 0 ? ParticleTypes.END_ROD : ParticleTypes.ENCHANT,
+                            ox, oy, oz,
+                            (RNG.nextDouble() - 0.5) * 0.22,
+                            0.06 + RNG.nextDouble() * 0.14,
+                            (RNG.nextDouble() - 0.5) * 0.22);
+                }
+            }
+            return ActionResult.PASS;
+        });
 
         PlayerBlockBreakEvents.AFTER.register((world, player, pos, state, blockEntity) -> {
             ArtemConfig c = ArtemConfig.get();
@@ -69,7 +106,35 @@ public final class EffectManager {
         if (client == null || client.world == null || client.player == null) return;
         ArtemConfig c = ArtemConfig.get();
 
-        // Отслеживание прыжка для Jump Circle
+        // Render Tweaks: отключаем тряску камеры для чистого PvP
+        if (renderTweaks && client.options != null) {
+            client.options.getBobView().setValue(false);
+        }
+
+        // World Customizer: фиксируем выбранное время суток на клиенте
+        if (worldCustomizer && worldTimeMode > 0) {
+            long targetTime = switch (worldTimeMode) {
+                case 1 -> 6000L;  // День
+                case 2 -> 12700L; // Закат
+                default -> 18000L; // Ночь
+            };
+            client.world.setTimeOfDay(targetTime);
+        }
+
+        // Запись точек для Trails (неонового шлейфа за игроком)
+        if (trails) {
+            Vec3d pos = new Vec3d(client.player.getX(), client.player.getY() + 0.15, client.player.getZ());
+            if (TRAIL_POINTS.isEmpty() || TRAIL_POINTS.getLast().squaredDistanceTo(pos) > 0.004) {
+                TRAIL_POINTS.addLast(pos);
+            }
+            while (TRAIL_POINTS.size() > trailLength) {
+                TRAIL_POINTS.removeFirst();
+            }
+        } else {
+            TRAIL_POINTS.clear();
+        }
+
+        // Jump Circle
         boolean onGround = client.player.isOnGround();
         if (jumpCircle && wasOnGround && !onGround && client.player.getVelocity().y > 0.12) {
             RINGS.add(new JumpRing(
@@ -83,7 +148,6 @@ public final class EffectManager {
         }
         wasOnGround = onGround;
 
-        // Удаление старых колец и лёгкие звёздные искры
         long now = System.currentTimeMillis();
         Iterator<JumpRing> it = RINGS.iterator();
         while (it.hasNext()) {
@@ -91,19 +155,6 @@ public final class EffectManager {
             long age = now - ring.createdMs;
             if (age > 850L) {
                 it.remove();
-                continue;
-            }
-            if (age % 90 < 45) {
-                float p = age / 850f;
-                float inv = 1f - p;
-                float ease = 1f - inv * inv * inv;
-                double r = 0.25 + ease * ring.maxRadius;
-                for (int s = 0; s < 4; s++) {
-                    double ang = (Math.PI * 2.0 * s) / 4.0 + p * 2.4;
-                    double sx = ring.x + Math.cos(ang) * r;
-                    double sz = ring.z + Math.sin(ang) * r;
-                    client.world.addParticle(ParticleTypes.END_ROD, sx, ring.y + 0.04, sz, 0.0, 0.01, 0.0);
-                }
             }
         }
 
@@ -147,7 +198,7 @@ public final class EffectManager {
 
     private static void onWorldRender(WorldRenderContext context) {
         MinecraftClient mc = MinecraftClient.getInstance();
-        if (mc == null || mc.world == null) return;
+        if (mc == null || mc.world == null || mc.player == null) return;
 
         MatrixStack matrices = context.matrixStack();
         VertexConsumerProvider consumers = context.consumers();
@@ -155,10 +206,63 @@ public final class EffectManager {
 
         Vec3d cam = context.camera().getPos();
         VertexConsumer lines = consumers.getBuffer(RenderLayer.getLines());
+        long now = System.currentTimeMillis();
 
-        // 1. Рендер 3D Jump Circle на земле со светящимися звёздами
+        // 1. Nimb (светящийся 3D-нимб над головой игрока от 3-го лица)
+        if (nimb && !mc.options.getPerspective().isFirstPerson()) {
+            float r = ((nimbColor >> 16) & 0xFF) / 255f;
+            float g = ((nimbColor >> 8) & 0xFF) / 255f;
+            float b = (nimbColor & 0xFF) / 255f;
+            double nx = mc.player.getX() - cam.x;
+            double ny = mc.player.getEyeY() + 0.36 + Math.sin(now / 350.0) * 0.03 - cam.y;
+            double nz = mc.player.getZ() - cam.z;
+            draw3DRing(matrices, lines, nx, ny, nz, 0.34, r, g, b, 0.95f);
+            draw3DRing(matrices, lines, nx, ny, nz, 0.36, r, g, b, 0.45f);
+        }
+
+        // 2. Trails (неоновый шлейф за игроком)
+        if (trails && TRAIL_POINTS.size() > 2) {
+            float r = ((trailColor >> 16) & 0xFF) / 255f;
+            float g = ((trailColor >> 8) & 0xFF) / 255f;
+            float b = (trailColor & 0xFF) / 255f;
+            int total = TRAIL_POINTS.size();
+            int idx = 0;
+            for (Vec3d pt : TRAIL_POINTS) {
+                float alpha = (idx / (float) total) * 0.85f;
+                double px = pt.x - cam.x;
+                double py = pt.y - cam.y;
+                double pz = pt.z - cam.z;
+                Box node = new Box(px - 0.025, py - 0.025, pz - 0.025, px + 0.025, py + 0.025, pz + 0.025);
+                WorldRenderer.drawBox(matrices, lines, node, r, g, b, alpha);
+                idx++;
+            }
+        }
+
+        // 3. Target ESP (пульсирующее 3D-кольцо вокруг цели в PvP)
+        if (targetEsp) {
+            LivingEntity target = null;
+            if (mc.targetedEntity instanceof LivingEntity le && le.isAlive()) {
+                target = le;
+            } else if (mc.player.getAttacking() != null && mc.player.getAttacking().isAlive()
+                    && (mc.player.age - mc.player.getLastAttackTime() < 80)) {
+                target = mc.player.getAttacking();
+            }
+            if (target != null) {
+                float r = ((targetEspColor >> 16) & 0xFF) / 255f;
+                float g = ((targetEspColor >> 8) & 0xFF) / 255f;
+                float b = (targetEspColor & 0xFF) / 255f;
+                double wave = (Math.sin(now / 260.0) + 1.0) * 0.5;
+                double tx = target.getX() - cam.x;
+                double ty = target.getY() + wave * target.getHeight() - cam.y;
+                double tz = target.getZ() - cam.z;
+                double radius = target.getWidth() * 0.85 + 0.15;
+                draw3DRing(matrices, lines, tx, ty, tz, radius, r, g, b, 0.95f);
+                draw3DRing(matrices, lines, tx, ty + 0.02, tz, radius + 0.03, r, g, b, 0.45f);
+            }
+        }
+
+        // 4. Jump Circle (тройное светящееся 3D-кольцо на земле со звёздами)
         if (jumpCircle && !RINGS.isEmpty()) {
-            long now = System.currentTimeMillis();
             for (JumpRing ring : RINGS) {
                 long age = now - ring.createdMs;
                 if (age > 850L) continue;
@@ -177,12 +281,10 @@ public final class EffectManager {
                 double cy = ring.y - cam.y;
                 double cz = ring.z - cam.z;
 
-                // 3 концентрических слоя для мягкого неонового свечения кольца
                 draw3DRing(matrices, lines, cx, cy, cz, baseR - 0.03, r, g, b, fade * 0.45f);
                 draw3DRing(matrices, lines, cx, cy, cz, baseR, r, g, b, fade * 0.95f);
                 draw3DRing(matrices, lines, cx, cy, cz, baseR + 0.035, r, g, b, fade * 0.40f);
 
-                // 8 вращающихся звёзд по окружности кольца
                 for (int s = 0; s < 8; s++) {
                     double ang = (Math.PI * 2.0 * s) / 8.0 + p * 2.2;
                     double sx = cx + Math.cos(ang) * baseR;
@@ -192,7 +294,7 @@ public final class EffectManager {
             }
         }
 
-        // 2. Рендер 3D Block Overlay по точной форме блока
+        // 5. Block Overlay (двойная неоновая обводка блока под прицелом)
         if (blockOverlay && mc.crosshairTarget instanceof BlockHitResult hit && hit.getType() == HitResult.Type.BLOCK) {
             BlockPos pos = hit.getBlockPos();
             BlockState state = mc.world.getBlockState(pos);
@@ -224,7 +326,7 @@ public final class EffectManager {
                                    double cx, double cy, double cz, double radius,
                                    float r, float g, float b, float alpha) {
         if (radius <= 0.02 || alpha <= 0.02f) return;
-        int segments = 64;
+        int segments = 56;
         for (int i = 0; i < segments; i++) {
             double a1 = (Math.PI * 2.0 * i) / segments;
             double a2 = (Math.PI * 2.0 * (i + 1)) / segments;
