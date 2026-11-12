@@ -11,9 +11,6 @@ import java.util.Base64;
 import java.util.HashMap;
 import java.util.Map;
 
-/**
- * Конфигурация ARTEM VISUALS 3.0 | PulseVisual Edition.
- */
 public class ArtemConfig {
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
     private static final Path CONFIG_PATH = FabricLoader.getInstance().getConfigDir().resolve("artemvisuals.json");
@@ -33,8 +30,7 @@ public class ArtemConfig {
         }
     }
 
-    // Версия схемы конфига для автоматической очистки старых наложенных координат
-    public int configVersion = 31;
+    public int configVersion = 32;
 
     // Базовые настройки
     public boolean masterEnabled = true;
@@ -48,8 +44,11 @@ public class ArtemConfig {
     public int density = 1;
     public int radius = 1;
 
-    // HUD (по умолчанию включён только чистый набор как в PulseVisual)
+    // HUD и масштабирование
     public boolean hudEditMode = false;
+    public float hudScale = 0.72f;
+    public float guiScale = 0.92f;
+
     public boolean showServer = true;
     public boolean showTargetHud = true;
     public boolean showHotKeys = true;
@@ -72,6 +71,28 @@ public class ArtemConfig {
     public boolean showRadar = false;
     public boolean showMinimap = false;
 
+    // Отдельные цвета HUD
+    public int hudAccentColor = 0xFF7B68EE;
+    public float hudHue = 0.72f;
+    public boolean hudUseCustomHue = false;
+    public boolean hudRainbow = false;
+    public int hudBgColor = 0x0C0C12;
+    public float hudBgAlpha = 0.88f;
+
+    // Маленький меч и улучшения камеры/боя
+    public boolean smallSword = true;
+    public boolean onlyWeapons = false;
+    public float swordScale = 0.62f;
+    public float swordOffsetX = 0.03f;
+    public float swordOffsetY = -0.04f;
+    public float swordOffsetZ = -0.05f;
+
+    public boolean noHurtCam = true;
+    public boolean lowFire = true;
+    public boolean projectileTrails = true;
+    public boolean screenVignette = true;
+    public boolean critSparks = true;
+
     // Прицел
     public boolean customCrosshair = true;
     public int crosshairStyle = 0;
@@ -82,7 +103,7 @@ public class ArtemConfig {
     public boolean crosshairOutline = true;
     public boolean crosshairDynamic = true;
 
-    // Visual модули (чистый набор без лишних линий на экране)
+    // Visual модули
     public boolean esp = false;
     public int espStyle = 0;
     public int espColor = 0xFF7B68EE;
@@ -150,9 +171,9 @@ public class ArtemConfig {
     public boolean skyTint = true;
     public boolean colorCorrection = false;
 
-    // Цвета окна, акцент и RGB
+    // Цвета окна меню
     public int clientAccent = 0xFF7B68EE;
-    public int windowBgColor = 0x0C0C12; // RGB без альфы
+    public int windowBgColor = 0x0C0C12;
     public float windowAlpha = 0.94f;
     public float customHue = 0.72f;
     public boolean useCustomHue = false;
@@ -189,26 +210,24 @@ public class ArtemConfig {
                 if (cfg != null) {
                     if (cfg.hudPositions == null) cfg.hudPositions = new HashMap<>();
                     if (cfg.keybinds == null) cfg.keybinds = new HashMap<>();
-                    // Миграция со старой версии: убираем наложенные друг на друга виджеты и линии
-                    if (cfg.configVersion < 31) {
-                        cfg.configVersion = 31;
+                    if (cfg.configVersion < 32) {
+                        cfg.configVersion = 32;
                         cfg.hudPositions.clear();
-                        cfg.showFps = false;
-                        cfg.showPing = false;
-                        cfg.showXyz = false;
-                        cfg.showCps = false;
-                        cfg.showWasd = false;
-                        cfg.showKeystrokes = false;
-                        cfg.showSpeed = false;
-                        cfg.showDirection = false;
-                        cfg.showNickname = false;
-                        cfg.showPlaytime = false;
-                        cfg.showHealthHud = false;
-                        cfg.showHungerHud = false;
-                        cfg.showArrayList = false;
-                        cfg.tracers = false;
-                        cfg.entityHighlight = false;
-                        cfg.playerHighlight = false;
+                        cfg.hudScale = 0.72f;
+                        cfg.guiScale = 0.92f;
+                        if (cfg.hudAccentColor == 0) cfg.hudAccentColor = 0xFF7B68EE;
+                        if (cfg.hudBgColor == 0) cfg.hudBgColor = 0x0C0C12;
+                        if (cfg.hudBgAlpha <= 0.1f) cfg.hudBgAlpha = 0.88f;
+                        cfg.smallSword = true;
+                        cfg.swordScale = 0.62f;
+                        cfg.swordOffsetX = 0.03f;
+                        cfg.swordOffsetY = -0.04f;
+                        cfg.swordOffsetZ = -0.05f;
+                        cfg.noHurtCam = true;
+                        cfg.lowFire = true;
+                        cfg.projectileTrails = true;
+                        cfg.screenVignette = true;
+                        cfg.critSparks = true;
                         cfg.save();
                     }
                     return cfg;
@@ -251,8 +270,7 @@ public class ArtemConfig {
     }
 
     public void resetDefaults() {
-        ArtemConfig fresh = new ArtemConfig();
-        replaceInstance(fresh);
+        replaceInstance(new ArtemConfig());
     }
 
     public HudPos getHudPos(String id, int defaultX, int defaultY) {
