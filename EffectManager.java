@@ -1,108 +1,182 @@
 package com.artem.visuals.effects;
 
 import com.artem.visuals.config.ArtemConfig;
-import net.fabricmc.fabric.api.event.client.player.ClientPlayerBlockBreakEvents;
+import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientBlockBreakEvents;
+import net.fabricmc.fabric.api.client.rendering.v1.WorldRenderContext;
+import net.fabricmc.fabric.api.client.rendering.v1.WorldRenderEvents;
 import net.minecraft.block.BlockState;
-import net.minecraft.block.Blocks;
 import net.minecraft.block.LeavesBlock;
 import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.world.ClientWorld;
-import net.minecraft.fluid.FluidState;
-import net.minecraft.particle.BlockStateParticleEffect;
+import net.minecraft.client.render.RenderLayer;
+import net.minecraft.client.render.VertexConsumer;
+import net.minecraft.client.render.VertexConsumerProvider;
+import net.minecraft.client.render.WorldRenderer;
+import net.minecraft.client.util.math.MatrixStack;
 import net.minecraft.particle.ParticleTypes;
 import net.minecraft.registry.tag.FluidTags;
+import net.minecraft.util.hit.BlockHitResult;
+import net.minecraft.util.hit.HitResult;
 import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.random.Random;
-import net.minecraft.world.Heightmap;
-import net.minecraft.world.biome.Biome;
+import net.minecraft.util.math.Box;
+import net.minecraft.util.math.Vec3d;
+import net.minecraft.util.shape.VoxelShape;
+
+import java.util.ArrayList;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Random;
 
 /**
- * Клиентские частицы. Не затрагивает серверную логику.
+ * 3D-эффекты мира в стиле PulseVisuals / FunTime: Jump Circle, Block Overlay и частицы окружения.
  */
 public final class EffectManager {
-    private static int counter = 0;
+    public static boolean jumpCircle = true;
+    public static float jumpCircleRadius = 1.2f;
+    public static int jumpCircleColor = 0xFFFFD166;
+
+    public static boolean blockOverlay = true;
+    public static float blockOverlayAlpha = 0.85f;
+    public static int blockOverlayColor = 0xFFFFD166;
+
+    private static final Random RNG = new Random();
+    private static final List<JumpRing> RINGS = new ArrayList<>();
+    private static boolean wasOnGround = true;
+
+    private record JumpRing(double x, double y, double z, long createdMs, float maxRadius, int color) {}
 
     private EffectManager() {}
 
     public static void registerEvents() {
-        ClientPlayerBlockBreakEvents.AFTER.register((world, player, pos, state) -> {
+        WorldRenderEvents.AFTER_TRANSLUCENT.register(EffectManager::onWorldRender);
+
+        ClientBlockBreakEvents.AFTER.register((world, player, pos, state, blockEntity) -> {
             ArtemConfig c = ArtemConfig.get();
-            if (!c.masterEnabled || !c.blockBreakEffects || state.isAir()) return;
-            MinecraftClient mc = MinecraftClient.getInstance();
-            if (c.adaptive && mc.getCurrentFps() < c.fpsThreshold()) return;
-            Random r = world.random;
-            int n = (int) Math.round(10 * c.densityMul());
-            for (int i = 0; i < n; i++) {
-                world.addParticle(new BlockStateParticleEffect(ParticleTypes.BLOCK, state),
-                        pos.getX() + r.nextDouble(), pos.getY() + r.nextDouble(), pos.getZ() + r.nextDouble(),
-                        (r.nextDouble() - 0.5) * 0.25, r.nextDouble() * 0.2, (r.nextDouble() - 0.5) * 0.25);
-            }
-            for (int i = 0; i < Math.max(1, n / 4); i++) {
-                world.addParticle(ParticleTypes.POOF,
-                        pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5,
-                        (r.nextDouble() - 0.5) * 0.1, 0.02, (r.nextDouble() - 0.5) * 0.1);
+            if (!c.masterEnabled || !c.blockBreakEffects || world == null) return;
+            for (int i = 0; i < 8; i++) {
+                double ox = pos.getX() + 0.2 + RNG.nextDouble() * 0.6;
+                double oy = pos.getY() + 0.2 + RNG.nextDouble() * 0.6;
+                double oz = pos.getZ() + 0.2 + RNG.nextDouble() * 0.6;
+                world.addParticle(ParticleTypes.ENCHANT, ox, oy, oz,
+                        (RNG.nextDouble() - 0.5) * 0.15, 0.08 + RNG.nextDouble() * 0.1, (RNG.nextDouble() - 0.5) * 0.15);
             }
         });
     }
 
-    public static void tick(MinecraftClient mc) {
-        ClientWorld w = mc.world;
-        if (w == null || mc.player == null || mc.isPaused()) return;
+    public static void tick(MinecraftClient client) {
+        if (client == null || client.world == null || client.player == null) return;
         ArtemConfig c = ArtemConfig.get();
+
+        // Отслеживание прыжка для Jump Circle
+        boolean onGround = client.player.isOnGround();
+        if (jumpCircle && wasOnGround && !onGround && client.player.getVelocity().y > 0.12) {
+            RINGS.add(new JumpRing(
+                    client.player.getX(),
+                    client.player.getY() + 0.04,
+                    client.player.getZ(),
+                    System.currentTimeMillis(),
+                    jumpCircleRadius,
+                    jumpCircleColor
+            ));
+        }
+        wasOnGround = onGround;
+
+        // Анимация колец и звёздочек при прыжке
+        long now = System.currentTimeMillis();
+        Iterator<JumpRing> it = RINGS.iterator();
+        while (it.hasNext()) {
+            JumpRing ring = it.next();
+            long age = now - ring.createdMs;
+            if (age > 750L) {
+                it.remove();
+                continue;
+            }
+            float p = age / 750f;
+            float inv = 1f - p;
+            float ease = 1f - inv * inv * inv;
+            double r = 0.2 + ease * ring.maxRadius;
+
+            // Светящийся контур кольца из мелких искр
+            int points = 24;
+            for (int i = 0; i < points; i++) {
+                double ang = (Math.PI * 2.0 * i) / points + p * 1.5;
+                double px = ring.x + Math.cos(ang) * r;
+                double pz = ring.z + Math.sin(ang) * r;
+                client.world.addParticle(ParticleTypes.ELECTRIC_SPARK, px, ring.y, pz, 0.0, 0.005, 0.0);
+            }
+
+            // 8 ярких звёздочек по окружности (как на скриншоте PulseVisuals)
+            if (age % 60 < 50) {
+                for (int s = 0; s < 8; s++) {
+                    double ang = (Math.PI * 2.0 * s) / 8.0 + p * 2.2;
+                    double sx = ring.x + Math.cos(ang) * r;
+                    double sz = ring.z + Math.sin(ang) * r;
+                    client.world.addParticle(ParticleTypes.END_ROD, sx, ring.y + 0.03, sz, 0.0, 0.012, 0.0);
+                }
+            }
+        }
+
         if (!c.masterEnabled) return;
-        if (c.adaptive && mc.getCurrentFps() < c.fpsThreshold()) return;
-        if (++counter % 4 != 0) return;
+        if (c.adaptive && client.getCurrentFps() < c.fpsThreshold()) return;
 
-        Random rnd = w.random;
-        BlockPos origin = mc.player.getBlockPos();
-        int r = c.radiusBlocks();
-        int attempts = Math.max(2, (int) Math.round(6 * c.densityMul()));
-        BlockPos.Mutable m = new BlockPos.Mutable();
-        boolean night = !w.isDay();
+        int count = (c.density + 1) * 2;
+        int rad = (c.radius + 1) * 6;
+        BlockPos center = client.player.getBlockPos();
 
-        for (int i = 0; i < attempts; i++) {
-            m.set(origin.getX() + rnd.nextBetween(-r, r),
-                  origin.getY() + rnd.nextBetween(-r / 2, r / 2),
-                  origin.getZ() + rnd.nextBetween(-r, r));
-            BlockState s = w.getBlockState(m);
+        for (int i = 0; i < count; i++) {
+            int dx = RNG.nextInt(rad * 2 + 1) - rad;
+            int dy = RNG.nextInt(10) - 3;
+            int dz = RNG.nextInt(rad * 2 + 1) - rad;
+            BlockPos pos = center.add(dx, dy, dz);
+            BlockState state = client.world.getBlockState(pos);
 
-            if (c.leafParticles && s.getBlock() instanceof LeavesBlock
-                    && w.getBlockState(m.down()).isAir() && rnd.nextInt(10) == 0) {
-                w.addParticle(new BlockStateParticleEffect(ParticleTypes.FALLING_DUST, s),
-                        m.getX() + rnd.nextDouble(), m.getY() - 0.05, m.getZ() + rnd.nextDouble(),
-                        (rnd.nextDouble() - 0.5) * 0.04, -0.02, (rnd.nextDouble() - 0.5) * 0.04);
-            } else if (c.waterSparkles && !night) {
-                FluidState f = s.getFluidState();
-                if (f.isIn(FluidTags.WATER) && f.isStill() && w.getBlockState(m.up()).isAir()
-                        && w.isSkyVisible(m.up()) && rnd.nextInt(6) == 0) {
-                    w.addParticle(ParticleTypes.BUBBLE_POP,
-                            m.getX() + rnd.nextDouble(), m.getY() + f.getHeight(), m.getZ() + rnd.nextDouble(),
-                            0, 0.01, 0);
-                }
-            } else if (c.fireflies && night && s.isOf(Blocks.GRASS_BLOCK)
-                    && w.getBlockState(m.up()).isAir() && rnd.nextInt(14) == 0) {
-                w.addParticle(ParticleTypes.GLOW,
-                        m.getX() + rnd.nextDouble(), m.getY() + 1.0 + rnd.nextDouble() * 1.5, m.getZ() + rnd.nextDouble(),
-                        (rnd.nextDouble() - 0.5) * 0.02, 0.005, (rnd.nextDouble() - 0.5) * 0.02);
+            if (c.leafParticles && state.getBlock() instanceof LeavesBlock && client.world.isAir(pos.down())) {
+                client.world.addParticle(ParticleTypes.CHERRY_LEAVES,
+                        pos.getX() + RNG.nextDouble(), pos.getY() - 0.05, pos.getZ() + RNG.nextDouble(),
+                        0.0, -0.03, 0.0);
             }
-        }
 
-        if (c.precipitationEffects && w.isRaining()) {
-            for (int i = 0; i < attempts; i++) {
-                int x = origin.getX() + rnd.nextBetween(-r, r);
-                int z = origin.getZ() + rnd.nextBetween(-r, r);
-                if (!w.getChunkManager().isChunkLoaded(x >> 4, z >> 4)) continue;
-                int top = w.getTopY(Heightmap.Type.MOTION_BLOCKING, x, z);
-                BlockPos pos = new BlockPos(x, top, z);
-                Biome.Precipitation p = w.getBiome(pos).value().getPrecipitation(pos);
-                if (p == Biome.Precipitation.SNOW) {
-                    w.addParticle(ParticleTypes.SNOWFLAKE,
-                            x + rnd.nextDouble(), top + 1 + rnd.nextDouble() * 5, z + rnd.nextDouble(),
-                            (rnd.nextDouble() - 0.5) * 0.05, -0.03, (rnd.nextDouble() - 0.5) * 0.05);
-                } else if (p == Biome.Precipitation.RAIN) {
-                    w.addParticle(ParticleTypes.RAIN, x + rnd.nextDouble(), top + 0.1, z + rnd.nextDouble(), 0, 0, 0);
+            if (c.waterSparkles && state.getFluidState().isIn(FluidTags.WATER) && client.world.isAir(pos.up())) {
+                if (RNG.nextFloat() < 0.35f) {
+                    client.world.addParticle(ParticleTypes.GLOW,
+                            pos.getX() + RNG.nextDouble(), pos.getY() + 0.95, pos.getZ() + RNG.nextDouble(),
+                            0.0, 0.01, 0.0);
+                }
+            }
+
+            if (c.fireflies && state.isAir() && client.world.getLightLevel(pos) <= 7) {
+                if (RNG.nextFloat() < 0.25f) {
+                    client.world.addParticle(ParticleTypes.END_ROD,
+                            pos.getX() + RNG.nextDouble(), pos.getY() + RNG.nextDouble(), pos.getZ() + RNG.nextDouble(),
+                            (RNG.nextDouble() - 0.5) * 0.02, 0.01, (RNG.nextDouble() - 0.5) * 0.02);
                 }
             }
         }
+    }
+
+    private static void onWorldRender(WorldRenderContext context) {
+        if (!blockOverlay) return;
+        MinecraftClient mc = MinecraftClient.getInstance();
+        if (mc == null || mc.world == null || mc.crosshairTarget == null) return;
+        if (!(mc.crosshairTarget instanceof BlockHitResult hit) || hit.getType() != HitResult.Type.BLOCK) return;
+
+        MatrixStack matrices = context.matrixStack();
+        VertexConsumerProvider consumers = context.consumers();
+        if (matrices == null || consumers == null) return;
+
+        BlockPos pos = hit.getBlockPos();
+        BlockState state = mc.world.getBlockState(pos);
+        if (state.isAir()) return;
+
+        VoxelShape shape = state.getOutlineShape(mc.world, pos);
+        Box box = shape.isEmpty() ? new Box(pos) : shape.getBoundingBox().offset(pos);
+        Vec3d cam = context.camera().getPos();
+        box = box.expand(0.003).offset(-cam.x, -cam.y, -cam.z);
+
+        float r = ((blockOverlayColor >> 16) & 0xFF) / 255f;
+        float g = ((blockOverlayColor >> 8) & 0xFF) / 255f;
+        float b = (blockOverlayColor & 0xFF) / 255f;
+
+        VertexConsumer lines = consumers.getBuffer(RenderLayer.getLines());
+        WorldRenderer.drawBox(matrices, lines, box, r, g, b, blockOverlayAlpha);
     }
 }
