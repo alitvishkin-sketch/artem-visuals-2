@@ -1,6 +1,7 @@
 package com.artem.visuals.gui;
 
 import com.artem.visuals.config.ArtemConfig;
+import com.artem.visuals.effects.EffectManager;
 import com.artem.visuals.hud.HudManager;
 import com.artem.visuals.optimize.Optimizer;
 import net.minecraft.client.MinecraftClient;
@@ -8,7 +9,9 @@ import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.PlayerSkinDrawer;
 import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.network.AbstractClientPlayerEntity;
+import net.minecraft.client.network.PlayerListEntry;
 import net.minecraft.text.Text;
+import net.minecraft.util.math.BlockPos;
 import org.lwjgl.glfw.GLFW;
 
 import java.util.ArrayList;
@@ -23,27 +26,34 @@ import java.util.function.Supplier;
 
 public class ArtemScreen extends Screen {
     private enum Category {
-        VISUALS("Визуалы", "Основные", false),
-        HUD("Интерфейс", "Основные", false),
-        SWORD("Меч и Камера", "Основные", false),
-        OPTIMIZE("Оптимизация", "Основные", true),
-        WORLD("Мир и Время", "Остальные", false),
-        CONFIGS("Конфиги", "Остальные", false),
-        THEMES("Темы", "Остальные", false);
+        MAIN("Основное", "Основные", null, "Общее"),
+        HELPERS("Хелперы", "Основные", "New", "Помощник"),
+        AUCTION("Аукцион", "Основные", "Updated", "Фантайм"),
+        OPTIMIZE("Оптимизация", "Основные", null, "Производительность"),
+        VISUALS("Визуалы", "Основные", null, "Эффекты"),
+        HUD("Интерфейс", "Основные", null, "Элементы HUD"),
+        CONFIGS("Конфиги", "Остальные", null, "Профили"),
+        FRIENDS("Друзья", "Остальные", null, "Список друзей"),
+        EVENTS("Ивенты", "Остальные", null, "Таймер событий"),
+        WAYPOINTS("Точки", "Остальные", null, "Метки координат"),
+        THEMES("Темы", "Остальные", null, "Оформление");
 
         final String title;
         final String group;
-        final boolean badge;
+        final String badge;
+        final String subPill;
 
-        Category(String title, String group, boolean badge) {
+        Category(String title, String group, String badge, String subPill) {
             this.title = title;
             this.group = group;
             this.badge = badge;
+            this.subPill = subPill;
         }
     }
 
-    private sealed interface RowItem permits ToggleRow, SliderRow, SwatchRow, ActionRow {}
+    private sealed interface RowItem permits ToggleRow, SliderRow, SwatchRow, ActionRow, HeaderLabelRow {}
 
+    private record HeaderLabelRow(String title, Category category) implements RowItem {}
     private record ToggleRow(String label, Category category, BooleanSupplier getter, Runnable toggler, Runnable onSettings) implements RowItem {}
     private record SliderRow(String label, Category category, double min, double max, boolean integer, DoubleSupplier getter, DoubleConsumer setter) implements RowItem {}
     private record SwatchRow(String label, Category category, int[] palette, IntSupplier getter, IntConsumer setter) implements RowItem {}
@@ -60,7 +70,7 @@ public class ArtemScreen extends Screen {
     };
 
     private final Screen parent;
-    private Category activeCategory = Category.VISUALS;
+    private Category activeCategory = Category.HELPERS;
     private String searchQuery = "";
     private boolean searchFocused = false;
     private String statusToast = "";
@@ -89,19 +99,19 @@ public class ArtemScreen extends Screen {
         ArtemConfig c = ArtemConfig.get();
         float s = Math.max(0.75f, Math.min(1.15f, c.guiScale));
 
-        winW = Math.min(width - 20, Math.round(396 * s));
-        winH = Math.min(height - 20, Math.round(248 * s));
+        winW = Math.min(width - 20, Math.round(404 * s));
+        winH = Math.min(height - 16, Math.round(256 * s));
         winX = (width - winW) / 2;
         winY = (height - winH) / 2;
 
-        sideW = Math.round(108 * s);
+        sideW = Math.round(112 * s);
         mainX = winX + sideW;
         mainW = winW - sideW;
 
         listX = mainX + 10;
-        listY = winY + 42;
+        listY = winY + 41;
         listW = mainW - 20;
-        listH = winH - 50;
+        listH = winH - 49;
     }
 
     private void toast(String msg) {
@@ -118,8 +128,72 @@ public class ArtemScreen extends Screen {
 
     private List<RowItem> buildAllRows(ArtemConfig c) {
         List<RowItem> all = new ArrayList<>();
+        MinecraftClient mc = MinecraftClient.getInstance();
 
-        // Визуалы
+        // === ОСНОВНОЕ ===
+        all.add(new ToggleRow("Маленький меч (SmallSword)", Category.MAIN, () -> c.smallSword, () -> { c.smallSword = !c.smallSword; c.save(); }, null));
+        all.add(new ToggleRow("Уменьшать только оружие", Category.MAIN, () -> c.onlyWeapons, () -> { c.onlyWeapons = !c.onlyWeapons; c.save(); }, null));
+        all.add(new SliderRow("Размер предмета в руке", Category.MAIN, 0.25, 1.25, false, () -> c.swordScale, v -> { c.swordScale = (float) v; c.save(); }));
+        all.add(new SliderRow("Смещение по X", Category.MAIN, -0.40, 0.40, false, () -> c.swordOffsetX, v -> { c.swordOffsetX = (float) v; c.save(); }));
+        all.add(new SliderRow("Смещение по Y", Category.MAIN, -0.40, 0.40, false, () -> c.swordOffsetY, v -> { c.swordOffsetY = (float) v; c.save(); }));
+        all.add(new SliderRow("Смещение по Z", Category.MAIN, -0.40, 0.40, false, () -> c.swordOffsetZ, v -> { c.swordOffsetZ = (float) v; c.save(); }));
+        all.add(new ToggleRow("Свечение предметов в руках", Category.MAIN, () -> c.handGlow, () -> { c.handGlow = !c.handGlow; c.save(); }, null));
+        all.add(new ToggleRow("No HurtCam (Без тряски урона)", Category.MAIN, () -> c.noHurtCam, () -> { c.noHurtCam = !c.noHurtCam; c.save(); }, null));
+        all.add(new ToggleRow("Low Fire (Низкий огонь)", Category.MAIN, () -> c.lowFire, () -> { c.lowFire = !c.lowFire; c.save(); }, null));
+        all.add(new ToggleRow("Мягкая виньетка экрана", Category.MAIN, () -> c.screenVignette, () -> { c.screenVignette = !c.screenVignette; c.save(); }, null));
+        all.add(new ToggleRow("Убрать покачивание камеры", Category.MAIN, () -> c.renderTweaks, () -> { c.renderTweaks = !c.renderTweaks; c.save(); }, null));
+        all.add(new ToggleRow("Кастомный прицел", Category.MAIN, () -> c.customCrosshair, () -> { c.customCrosshair = !c.customCrosshair; c.save(); }, null));
+        all.add(new SwatchRow("Цвет прицела", Category.MAIN, ACCENT_PALETTE, () -> c.crosshairColor, v -> { c.crosshairColor = v; c.save(); }));
+
+        // === ХЕЛПЕРЫ ===
+        all.add(new ToggleRow("Авто-спринт (AutoSprint)", Category.HELPERS, () -> c.autoSprint, () -> { c.autoSprint = !c.autoSprint; c.save(); }, null));
+        all.add(new ToggleRow("Виджет кулдаунов (Жемчуг/Чарка)", Category.HELPERS, () -> c.showCooldowns, () -> { c.showCooldowns = !c.showCooldowns; c.save(); }, null));
+        all.add(new ToggleRow("Предупреждение о поломке брони", Category.HELPERS, () -> c.lowArmorAlert, () -> { c.lowArmorAlert = !c.lowArmorAlert; c.save(); }, null));
+        all.add(new SliderRow("Порог прочности брони (%)", Category.HELPERS, 5, 50, true, () -> c.lowArmorThreshold, v -> { c.lowArmorThreshold = (int) v; c.save(); }));
+        all.add(new ToggleRow("Уведомление об окончании зелий", Category.HELPERS, () -> c.potionExpiryAlert, () -> { c.potionExpiryAlert = !c.potionExpiryAlert; c.save(); }, null));
+        all.add(new ToggleRow("Координаты смерти в чат", Category.HELPERS, () -> c.deathCoords, () -> { c.deathCoords = !c.deathCoords; c.save(); }, null));
+        all.add(new ToggleRow("Авто-точка на месте смерти", Category.HELPERS, () -> c.autoDeathWaypoint, () -> { c.autoDeathWaypoint = !c.autoDeathWaypoint; c.save(); }, null));
+        all.add(new HeaderLabelRow("Быстрые команды", Category.HELPERS));
+        all.add(new ActionRow("Открыть аукцион (/ah)", Category.HELPERS, () -> "/ah", () -> sendCmd(mc, "ah")));
+        all.add(new ActionRow("Открыть эндер-сундук (/ec)", Category.HELPERS, () -> "/ec", () -> sendCmd(mc, "ec")));
+        all.add(new ActionRow("Открыть верстак (/craft)", Category.HELPERS, () -> "/craft", () -> sendCmd(mc, "craft")));
+        all.add(new ActionRow("Починить предмет (/fix)", Category.HELPERS, () -> "/fix", () -> sendCmd(mc, "fix")));
+
+        // === АУКЦИОН ===
+        all.add(new HeaderLabelRow("Помощник", Category.AUCTION));
+        all.add(new ToggleRow("Показать цену за один", Category.AUCTION, () -> c.ahUnitPrice, () -> { c.ahUnitPrice = !c.ahUnitPrice; c.save(); }, null));
+        all.add(new ToggleRow("Автоперевыставление", Category.AUCTION, () -> c.ahAutoRelist, () -> { c.ahAutoRelist = !c.ahAutoRelist; c.save(); }, null));
+        all.add(new SliderRow("Интервал перевыставления (сек)", Category.AUCTION, 10, 300, true, () -> c.ahRelistInterval, v -> { c.ahRelistInterval = (int) v; c.save(); }));
+        all.add(new ToggleRow("/ah search по предмету в руке [H]", Category.AUCTION, () -> c.ahSearchHandItem, () -> { c.ahSearchHandItem = !c.ahSearchHandItem; c.save(); }, null));
+        all.add(new ActionRow("Найти предмет в руке на аукционе", Category.AUCTION, () -> "Поиск", () -> {
+            EffectManager.triggerAhSearchForHand(mc);
+            close();
+        }));
+
+        // === ОПТИМИЗАЦИЯ ===
+        all.add(new ToggleRow("Fullbright (Яркость 100%)", Category.OPTIMIZE, () -> c.softLighting, () -> {
+            c.softLighting = !c.softLighting;
+            c.save();
+            Optimizer.applyLighting(mc);
+        }, null));
+        all.add(new ToggleRow("Адаптивный FPS лимитер частиц", Category.OPTIMIZE, () -> c.adaptive, () -> { c.adaptive = !c.adaptive; c.save(); }, null));
+        all.add(new ToggleRow("Авто-профиль для FunTime", Category.OPTIMIZE, () -> c.autoFunTime, () -> { c.autoFunTime = !c.autoFunTime; c.save(); }, null));
+        all.add(new ActionRow("Время суток в мире", Category.OPTIMIZE, () -> switch (c.worldTimeMode) {
+            case 1 -> "День";
+            case 2 -> "Закат";
+            case 3 -> "Ночь";
+            default -> "Сервер";
+        }, () -> {
+            c.worldCustomizer = true;
+            c.worldTimeMode = (c.worldTimeMode + 1) % 4;
+            c.save();
+        }));
+        all.add(new ActionRow("Оптимизировать графику (FPS Boost)", Category.OPTIMIZE, () -> "Применить", () -> {
+            Optimizer.applyPerformancePreset(mc);
+            toast("Настройки FPS применены");
+        }));
+
+        // === ВИЗУАЛЫ ===
         all.add(new ToggleRow("Target ESP", Category.VISUALS, () -> c.targetEsp, () -> { c.targetEsp = !c.targetEsp; c.save(); },
                 () -> openSubDetails("Target ESP", List.of(
                         new SwatchRow("Цвет кольца", Category.VISUALS, ACCENT_PALETTE, () -> c.targetEspColor, v -> { c.targetEspColor = v; c.save(); }),
@@ -145,131 +219,144 @@ public class ArtemScreen extends Screen {
                         new ToggleRow("Показывать здоровье", Category.VISUALS, () -> c.nameTagsHealth, () -> { c.nameTagsHealth = !c.nameTagsHealth; c.save(); }, null),
                         new ToggleRow("Показывать дистанцию", Category.VISUALS, () -> c.nameTagsDistance, () -> { c.nameTagsDistance = !c.nameTagsDistance; c.save(); }, null)
                 ))));
-        all.add(new ToggleRow("Hit Particles (Частицы удара)", Category.VISUALS, () -> c.hitParticles, () -> { c.hitParticles = !c.hitParticles; c.save(); },
-                () -> openSubDetails("Hit Particles", List.of(
-                        new SliderRow("Количество частиц", Category.VISUALS, 4, 32, true, () -> c.hitParticlesCount, v -> { c.hitParticlesCount = (int) v; c.save(); })
-                ))));
+        all.add(new ToggleRow("Hit Particles (Частицы удара)", Category.VISUALS, () -> c.hitParticles, () -> { c.hitParticles = !c.hitParticles; c.save(); }, null));
         all.add(new ToggleRow("Crit Sparks (Искры критов)", Category.VISUALS, () -> c.critSparks, () -> { c.critSparks = !c.critSparks; c.save(); }, null));
         all.add(new ToggleRow("Damage Indicator", Category.VISUALS, () -> c.damageIndicator, () -> { c.damageIndicator = !c.damageIndicator; c.save(); }, null));
         all.add(new ToggleRow("Projectile Trails (След стрел)", Category.VISUALS, () -> c.projectileTrails, () -> { c.projectileTrails = !c.projectileTrails; c.save(); }, null));
-        all.add(new ToggleRow("Block Overlay (Обводка блока)", Category.VISUALS, () -> c.blockOverlay, () -> { c.blockOverlay = !c.blockOverlay; c.save(); },
-                () -> openSubDetails("Block Overlay", List.of(
-                        new SwatchRow("Цвет обводки", Category.VISUALS, ACCENT_PALETTE, () -> c.blockOverlayColor, v -> { c.blockOverlayColor = v; c.save(); }),
-                        new SliderRow("Прозрачность", Category.VISUALS, 0.2, 1.0, false, () -> c.blockOverlayAlpha, v -> { c.blockOverlayAlpha = (float) v; c.save(); })
-                ))));
-        all.add(new ToggleRow("Player ESP", Category.VISUALS, () -> c.esp, () -> { c.esp = !c.esp; c.save(); },
-                () -> openSubDetails("Player ESP", List.of(
-                        new SwatchRow("Цвет ESP", Category.VISUALS, ACCENT_PALETTE, () -> c.espColor, v -> { c.espColor = v; c.save(); }),
-                        new ToggleRow("Пульсация", Category.VISUALS, () -> c.espPulse, () -> { c.espPulse = !c.espPulse; c.save(); }, null)
-                ))));
+        all.add(new ToggleRow("Block Overlay (Обводка блока)", Category.VISUALS, () -> c.blockOverlay, () -> { c.blockOverlay = !c.blockOverlay; c.save(); }, null));
+        all.add(new ToggleRow("Player ESP", Category.VISUALS, () -> c.esp, () -> { c.esp = !c.esp; c.save(); }, null));
         all.add(new ToggleRow("Chams", Category.VISUALS, () -> c.chams, () -> { c.chams = !c.chams; c.save(); }, null));
         all.add(new ToggleRow("Tracers", Category.VISUALS, () -> c.tracers, () -> { c.tracers = !c.tracers; c.save(); }, null));
         all.add(new ToggleRow("Item ESP", Category.VISUALS, () -> c.itemEsp, () -> { c.itemEsp = !c.itemEsp; c.save(); }, null));
+        all.add(new ToggleRow("Падающая листва", Category.VISUALS, () -> c.leafParticles, () -> { c.leafParticles = !c.leafParticles; c.save(); }, null));
+        all.add(new ToggleRow("Ночные светлячки", Category.VISUALS, () -> c.fireflies, () -> { c.fireflies = !c.fireflies; c.save(); }, null));
 
-        // Интерфейс
+        // === ИНТЕРФЕЙС ===
         all.add(new ToggleRow("Режим перемещения HUD", Category.HUD, () -> c.hudEditMode, () -> { c.hudEditMode = !c.hudEditMode; c.save(); }, null));
         all.add(new SliderRow("Масштаб элементов HUD", Category.HUD, 0.50, 1.20, false, () -> c.hudScale, v -> { c.hudScale = (float) v; c.save(); }));
         all.add(new ToggleRow("Верхняя панель (Ник/FPS/Время)", Category.HUD, () -> c.showServer, () -> { c.showServer = !c.showServer; c.save(); }, null));
         all.add(new ToggleRow("Мини-инвентарь (Inventory)", Category.HUD, () -> c.showInventory, () -> { c.showInventory = !c.showInventory; c.save(); }, null));
         all.add(new ToggleRow("Эффекты зелий (Potions)", Category.HUD, () -> c.showPotions, () -> { c.showPotions = !c.showPotions; c.save(); }, null));
+        all.add(new ToggleRow("Кулдауны предметов (Cooldowns)", Category.HUD, () -> c.showCooldowns, () -> { c.showCooldowns = !c.showCooldowns; c.save(); }, null));
         all.add(new ToggleRow("Горячие клавиши (Keybinds)", Category.HUD, () -> c.showHotKeys, () -> { c.showHotKeys = !c.showHotKeys; c.save(); }, null));
         all.add(new ToggleRow("Моделька игрока (Paperdoll)", Category.HUD, () -> c.showPaperdoll, () -> { c.showPaperdoll = !c.showPaperdoll; c.save(); }, null));
         all.add(new ToggleRow("TargetHUD", Category.HUD, () -> c.showTargetHud, () -> { c.showTargetHud = !c.showTargetHud; c.save(); }, null));
         all.add(new ToggleRow("Броня с прочностью (Armor)", Category.HUD, () -> c.showArmor, () -> { c.showArmor = !c.showArmor; c.save(); }, null));
         all.add(new ToggleRow("Проценты прочности брони", Category.HUD, () -> c.armorDurabilityPercent, () -> { c.armorDurabilityPercent = !c.armorDurabilityPercent; c.save(); }, null));
-        all.add(new ToggleRow("Список модулей (ArrayList)", Category.HUD, () -> c.showArrayList, () -> { c.showArrayList = !c.showArrayList; c.save(); }, null));
         all.add(new ToggleRow("Нажатия клавиш (Keystrokes)", Category.HUD, () -> c.showKeystrokes, () -> { c.showKeystrokes = !c.showKeystrokes; c.save(); }, null));
         all.add(new ToggleRow("Радар сущностей (Radar)", Category.HUD, () -> c.showRadar, () -> { c.showRadar = !c.showRadar; c.save(); }, null));
         all.add(new ToggleRow("Мини-карта (MiniMap)", Category.HUD, () -> c.showMinimap, () -> { c.showMinimap = !c.showMinimap; c.save(); }, null));
-        all.add(new ToggleRow("Координаты XYZ", Category.HUD, () -> c.showXyz, () -> { c.showXyz = !c.showXyz; c.save(); }, null));
-        all.add(new ToggleRow("Скорость (BPS)", Category.HUD, () -> c.showSpeed, () -> { c.showSpeed = !c.showSpeed; c.save(); }, null));
-        all.add(new ToggleRow("Счётчик кликов (CPS)", Category.HUD, () -> c.showCps, () -> { c.showCps = !c.showCps; c.save(); }, null));
         all.add(new ActionRow("Сбросить позиции HUD", Category.HUD, () -> "Сброс", () -> {
             c.hudPositions.clear();
             c.save();
             toast("Позиции HUD сброшены");
         }));
 
-        // Меч и Камера
-        all.add(new ToggleRow("Маленький меч (SmallSword)", Category.SWORD, () -> c.smallSword, () -> { c.smallSword = !c.smallSword; c.save(); }, null));
-        all.add(new ToggleRow("Уменьшать только оружие", Category.SWORD, () -> c.onlyWeapons, () -> { c.onlyWeapons = !c.onlyWeapons; c.save(); }, null));
-        all.add(new SliderRow("Размер предмета в руке", Category.SWORD, 0.25, 1.25, false, () -> c.swordScale, v -> { c.swordScale = (float) v; c.save(); }));
-        all.add(new SliderRow("Смещение по X", Category.SWORD, -0.40, 0.40, false, () -> c.swordOffsetX, v -> { c.swordOffsetX = (float) v; c.save(); }));
-        all.add(new SliderRow("Смещение по Y", Category.SWORD, -0.40, 0.40, false, () -> c.swordOffsetY, v -> { c.swordOffsetY = (float) v; c.save(); }));
-        all.add(new SliderRow("Смещение по Z", Category.SWORD, -0.40, 0.40, false, () -> c.swordOffsetZ, v -> { c.swordOffsetZ = (float) v; c.save(); }));
-        all.add(new ToggleRow("Свечение предметов в руках", Category.SWORD, () -> c.handGlow, () -> { c.handGlow = !c.handGlow; c.save(); }, null));
-        all.add(new ToggleRow("No HurtCam (Без тряски урона)", Category.SWORD, () -> c.noHurtCam, () -> { c.noHurtCam = !c.noHurtCam; c.save(); }, null));
-        all.add(new ToggleRow("Low Fire (Низкий огонь)", Category.SWORD, () -> c.lowFire, () -> { c.lowFire = !c.lowFire; c.save(); }, null));
-        all.add(new ToggleRow("Мягкая виньетка экрана", Category.SWORD, () -> c.screenVignette, () -> { c.screenVignette = !c.screenVignette; c.save(); }, null));
-        all.add(new ToggleRow("Убрать покачивание камеры", Category.SWORD, () -> c.renderTweaks, () -> { c.renderTweaks = !c.renderTweaks; c.save(); }, null));
-        all.add(new ToggleRow("Кастомный прицел", Category.SWORD, () -> c.customCrosshair, () -> { c.customCrosshair = !c.customCrosshair; c.save(); }, null));
-        all.add(new SwatchRow("Цвет прицела", Category.SWORD, ACCENT_PALETTE, () -> c.crosshairColor, v -> { c.crosshairColor = v; c.save(); }));
-
-        // Оптимизация
-        all.add(new ToggleRow("Fullbright (Яркость 100%)", Category.OPTIMIZE, () -> c.softLighting, () -> {
-            c.softLighting = !c.softLighting;
-            c.save();
-            Optimizer.applyLighting(MinecraftClient.getInstance());
-        }, null));
-        all.add(new ToggleRow("Адаптивный FPS лимитер частиц", Category.OPTIMIZE, () -> c.adaptive, () -> { c.adaptive = !c.adaptive; c.save(); }, null));
-        all.add(new ToggleRow("Авто-профиль для FunTime", Category.OPTIMIZE, () -> c.autoFunTime, () -> { c.autoFunTime = !c.autoFunTime; c.save(); }, null));
-        all.add(new ActionRow("Оптимизировать графику (FPS Boost)", Category.OPTIMIZE, () -> "Применить", () -> {
-            Optimizer.applyPerformancePreset(MinecraftClient.getInstance());
-            toast("Настройки FPS применены");
-        }));
-
-        // Мир и Время
-        all.add(new ActionRow("Время суток в мире", Category.WORLD, () -> switch (c.worldTimeMode) {
-            case 1 -> "День";
-            case 2 -> "Закат";
-            case 3 -> "Ночь";
-            default -> "Сервер";
-        }, () -> {
-            c.worldCustomizer = true;
-            c.worldTimeMode = (c.worldTimeMode + 1) % 4;
-            c.save();
-        }));
-        all.add(new ToggleRow("Падающая листва", Category.WORLD, () -> c.leafParticles, () -> { c.leafParticles = !c.leafParticles; c.save(); }, null));
-        all.add(new ToggleRow("Ночные светлячки", Category.WORLD, () -> c.fireflies, () -> { c.fireflies = !c.fireflies; c.save(); }, null));
-        all.add(new ToggleRow("Искры на поверхности воды", Category.WORLD, () -> c.waterSparkles, () -> { c.waterSparkles = !c.waterSparkles; c.save(); }, null));
-        all.add(new ToggleRow("Частицы разрушения блоков", Category.WORLD, () -> c.blockBreakEffects, () -> { c.blockBreakEffects = !c.blockBreakEffects; c.save(); }, null));
-        all.add(new ToggleRow("Цветокоррекция экрана", Category.WORLD, () -> c.colorCorrection, () -> { c.colorCorrection = !c.colorCorrection; c.save(); }, null));
-        all.add(new SliderRow("Плотность частиц мира", Category.WORLD, 0, 3, true, () -> c.density, v -> { c.density = (int) v; c.save(); }));
-
-        // Конфиги
+        // === КОНФИГИ ===
         all.add(new ActionRow("Пресет Andromeda Visuals", Category.CONFIGS, () -> "Загрузить", () -> {
             HudManager.applyPulsePreset();
             toast("Пресет Andromeda загружен");
         }));
-        all.add(new ActionRow("Пресет FunTime PvP", Category.CONFIGS, () -> "Загрузить", () -> {
-            HudManager.applyFunTimePreset(MinecraftClient.getInstance());
+        all.add(new ActionRow("Пресет FunTime PvP + Helpers", Category.CONFIGS, () -> "Загрузить", () -> {
+            HudManager.applyFunTimePreset(mc);
             toast("Пресет FunTime загружен");
         }));
         all.add(new ActionRow("Экспорт конфига в буфер обмена", Category.CONFIGS, () -> "Копировать", () -> {
-            MinecraftClient mc = MinecraftClient.getInstance();
             if (mc != null && mc.keyboard != null) {
                 mc.keyboard.setClipboard(c.exportBase64());
                 toast("Конфиг скопирован");
             }
         }));
         all.add(new ActionRow("Импорт конфига из буфера обмена", Category.CONFIGS, () -> "Вставить", () -> {
-            MinecraftClient mc = MinecraftClient.getInstance();
             if (mc != null && mc.keyboard != null && c.importBase64(mc.keyboard.getClipboard())) {
                 NeonButton.syncTheme();
                 init();
-                toast("Конфиг успешно импортирован");
+                toast("Конфиг импортирован");
             } else {
                 toast("Буфер не содержит конфиг");
             }
         }));
-        all.add(new ActionRow("Сбросить все настройки по умолчанию", Category.CONFIGS, () -> "Сбросить", () -> {
+        all.add(new ActionRow("Сбросить все настройки", Category.CONFIGS, () -> "Сбросить", () -> {
             c.resetDefaults();
             NeonButton.syncTheme();
             init();
             toast("Настройки сброшены");
         }));
 
-        // Темы
+        // === ДРУЗЬЯ ===
+        all.add(new ToggleRow("Подсвечивать друзей (NameTags/Target)", Category.FRIENDS, () -> c.highlightFriends, () -> { c.highlightFriends = !c.highlightFriends; c.save(); }, null));
+        all.add(new SwatchRow("Цвет подсветки друзей", Category.FRIENDS, new int[]{0xFF5CE67E, 0xFF00F5FF, 0xFFA594F9, 0xFFFFB703, 0xFFFF6B9D, 0xFFFFFFFF}, () -> c.friendColor, col -> { c.friendColor = col; c.save(); }));
+        if (!c.friends.isEmpty()) {
+            all.add(new HeaderLabelRow("Добавленные друзья (" + c.friends.size() + ")", Category.FRIENDS));
+            for (String f : new ArrayList<>(c.friends)) {
+                all.add(new ActionRow("★ " + f, Category.FRIENDS, () -> "Удалить", () -> {
+                    c.friends.removeIf(x -> x.equalsIgnoreCase(f));
+                    c.save();
+                    toast("Удалён: " + f);
+                }));
+            }
+        }
+        if (mc != null && mc.getNetworkHandler() != null && mc.player != null) {
+            String selfName = mc.player.getName().getString();
+            List<String> onlineOthers = new ArrayList<>();
+            for (PlayerListEntry entry : mc.getNetworkHandler().getPlayerList()) {
+                if (entry.getProfile() != null && entry.getProfile().getName() != null) {
+                    String n = entry.getProfile().getName();
+                    if (!n.equalsIgnoreCase(selfName) && !c.isFriend(n)) onlineOthers.add(n);
+                }
+            }
+            if (!onlineOthers.isEmpty()) {
+                all.add(new HeaderLabelRow("Игроки на сервере", Category.FRIENDS));
+                for (int i = 0; i < Math.min(10, onlineOthers.size()); i++) {
+                    final String candidate = onlineOthers.get(i);
+                    all.add(new ActionRow(candidate, Category.FRIENDS, () -> "+ Друг", () -> {
+                        if (!c.isFriend(candidate)) {
+                            c.friends.add(candidate);
+                            c.save();
+                            toast("Друг добавлен: " + candidate);
+                        }
+                    }));
+                }
+            }
+        }
+
+        // === ИВЕНТЫ ===
+        all.add(new ToggleRow("Показывать таймер ивента в HUD", Category.EVENTS, () -> c.showEventTimer, () -> { c.showEventTimer = !c.showEventTimer; c.save(); }, null));
+        all.add(new ActionRow("Запустить таймер на 5 минут", Category.EVENTS, () -> "Старт 5м", () -> startEventTimer(c, "Ивент", 5)));
+        all.add(new ActionRow("Запустить таймер на 15 минут", Category.EVENTS, () -> "Старт 15м", () -> startEventTimer(c, "Ивент", 15)));
+        all.add(new ActionRow("Запустить таймер на 30 минут", Category.EVENTS, () -> "Старт 30м", () -> startEventTimer(c, "Ивент", 30)));
+        all.add(new ActionRow("Остановить и скрыть таймер", Category.EVENTS, () -> "Стоп", () -> {
+            c.eventEndTimeMs = 0L;
+            c.showEventTimer = false;
+            c.save();
+            toast("Таймер остановлен");
+        }));
+
+        // === ТОЧКИ ===
+        all.add(new ToggleRow("Отображать точки на экране", Category.WAYPOINTS, () -> c.showWaypoints, () -> { c.showWaypoints = !c.showWaypoints; c.save(); }, null));
+        all.add(new ActionRow("Сохранить текущие координаты (База)", Category.WAYPOINTS, () -> "+ Точка", () -> {
+            if (mc != null && mc.player != null) {
+                BlockPos p = mc.player.getBlockPos();
+                String name = "Точка #" + (c.waypoints.size() + 1);
+                c.waypoints.add(new ArtemConfig.Waypoint(name, p.getX(), p.getY(), p.getZ(), c.hudAccentColor));
+                c.showWaypoints = true;
+                c.save();
+                toast("Сохранено: " + p.getX() + ", " + p.getY() + ", " + p.getZ());
+            }
+        }));
+        if (!c.waypoints.isEmpty()) {
+            all.add(new HeaderLabelRow("Сохранённые точки (" + c.waypoints.size() + ")", Category.WAYPOINTS));
+            for (ArtemConfig.Waypoint wp : new ArrayList<>(c.waypoints)) {
+                String coords = wp.name + " (" + wp.x + ", " + wp.y + ", " + wp.z + ")";
+                all.add(new ActionRow(coords, Category.WAYPOINTS, () -> "Удалить", () -> {
+                    c.waypoints.remove(wp);
+                    c.save();
+                    toast("Точка удалена");
+                }));
+            }
+        }
+
+        // === ТЕМЫ ===
         all.add(new SwatchRow("Акцент меню", Category.THEMES, ACCENT_PALETTE, () -> c.clientAccent, col -> {
             c.clientAccent = col;
             c.useCustomHue = false;
@@ -300,12 +387,29 @@ public class ArtemScreen extends Screen {
         return all;
     }
 
+    private void startEventTimer(ArtemConfig c, String name, int minutes) {
+        c.eventName = name;
+        c.eventEndTimeMs = System.currentTimeMillis() + minutes * 60_000L;
+        c.showEventTimer = true;
+        c.save();
+        toast("Таймер на " + minutes + " мин запущен");
+    }
+
+    private void sendCmd(MinecraftClient mc, String cmd) {
+        if (mc != null && mc.getNetworkHandler() != null) {
+            mc.getNetworkHandler().sendChatCommand(cmd);
+            close();
+        }
+    }
+
     private List<RowItem> visibleRows(ArtemConfig c) {
         if (!searchQuery.isBlank()) {
             String q = searchQuery.toLowerCase(Locale.ROOT).trim();
             List<RowItem> found = new ArrayList<>();
             for (RowItem item : buildAllRows(c)) {
-                if (rowLabel(item).toLowerCase(Locale.ROOT).contains(q)) found.add(item);
+                if (!(item instanceof HeaderLabelRow) && rowLabel(item).toLowerCase(Locale.ROOT).contains(q)) {
+                    found.add(item);
+                }
             }
             return found;
         }
@@ -318,6 +422,7 @@ public class ArtemScreen extends Screen {
     }
 
     private String rowLabel(RowItem r) {
+        if (r instanceof HeaderLabelRow h) return h.title();
         if (r instanceof ToggleRow t) return t.label();
         if (r instanceof SliderRow s) return s.label();
         if (r instanceof SwatchRow w) return w.label();
@@ -326,14 +431,16 @@ public class ArtemScreen extends Screen {
     }
 
     private Category rowCategory(RowItem r) {
+        if (r instanceof HeaderLabelRow h) return h.category();
         if (r instanceof ToggleRow t) return t.category();
         if (r instanceof SliderRow s) return s.category();
         if (r instanceof SwatchRow w) return w.category();
         if (r instanceof ActionRow a) return a.category();
-        return Category.VISUALS;
+        return Category.HELPERS;
     }
 
     private int rowHeight(RowItem r) {
+        if (r instanceof HeaderLabelRow) return 12;
         return (r instanceof SliderRow) ? 24 : 18;
     }
 
@@ -374,47 +481,48 @@ public class ArtemScreen extends Screen {
 
     private void renderSidebar(DrawContext ctx, int mouseX, int mouseY, int accB) {
         int lx = winX + 11;
-        int ly = winY + 11;
+        int ly = winY + 10;
         drawStarLogo(ctx, lx, ly, accB);
         NeonButton.drawSmallText(ctx, textRenderer, "Artem", lx + 12, ly - 2, 0xFFF4F4FC, 0.95f);
 
         int sx = winX + 7;
-        int sy = winY + 24;
+        int sy = winY + 23;
         int sw = sideW - 14;
-        NeonButton.fillSmoothRounded(ctx, sx, sy, sw, 14, 4, searchFocused ? 0xFF1E1E28 : 0xFF181820);
-        NeonButton.drawSmoothRoundedOutline(ctx, sx, sy, sw, 14, 4, searchFocused ? ((accB & 0x00FFFFFF) | 0x88000000) : 0x18FFFFFF);
-        drawSearchIcon(ctx, sx + 5, sy + 4, 0xFF7A7A90);
+        NeonButton.fillSmoothRounded(ctx, sx, sy, sw, 13, 4, searchFocused ? 0xFF1E1E28 : 0xFF181820);
+        NeonButton.drawSmoothRoundedOutline(ctx, sx, sy, sw, 13, 4, searchFocused ? ((accB & 0x00FFFFFF) | 0x88000000) : 0x18FFFFFF);
+        drawSearchIcon(ctx, sx + 5, sy + 3, 0xFF7A7A90);
 
         String shownSearch = searchQuery.isEmpty()
                 ? (searchFocused ? "|" : "Поиск...")
                 : (searchQuery + (searchFocused && (System.currentTimeMillis() / 500) % 2 == 0 ? "|" : ""));
-        NeonButton.drawSmallText(ctx, textRenderer, shownSearch, sx + 14, sy + 4, searchQuery.isEmpty() ? 0xFF6E6E84 : 0xFFEAEAF6, 0.78f);
+        NeonButton.drawSmallText(ctx, textRenderer, shownSearch, sx + 14, sy + 3, searchQuery.isEmpty() ? 0xFF6E6E84 : 0xFFEAEAF6, 0.76f);
 
-        int cy = winY + 44;
+        int cy = winY + 41;
         String lastGroup = "";
         for (Category cat : Category.values()) {
             if (!cat.group.equals(lastGroup)) {
                 lastGroup = cat.group;
-                NeonButton.drawSmallText(ctx, textRenderer, lastGroup, winX + 9, cy, 0xFF646478, 0.72f);
-                cy += 9;
+                NeonButton.drawSmallText(ctx, textRenderer, lastGroup, winX + 9, cy, 0xFF646478, 0.70f);
+                cy += 8;
             }
             boolean selected = searchQuery.isBlank() && activeCategory == cat;
-            boolean hovered = mouseX >= winX + 6 && mouseX <= winX + sideW - 6 && mouseY >= cy && mouseY <= cy + 14;
-            if (selected) NeonButton.fillSmoothRounded(ctx, winX + 6, cy, sideW - 12, 14, 4, 0xFF21212B);
-            else if (hovered) NeonButton.fillSmoothRounded(ctx, winX + 6, cy, sideW - 12, 14, 4, 0x881C1C24);
+            boolean hovered = mouseX >= winX + 6 && mouseX <= winX + sideW - 6 && mouseY >= cy && mouseY <= cy + 12;
+            if (selected) NeonButton.fillSmoothRounded(ctx, winX + 6, cy, sideW - 12, 12, 3, 0xFF21212B);
+            else if (hovered) NeonButton.fillSmoothRounded(ctx, winX + 6, cy, sideW - 12, 12, 3, 0x881C1C24);
 
-            drawCategoryIcon(ctx, cat, winX + 10, cy + 3, selected ? accB : (hovered ? 0xFFB8B8CE : 0xFF7D7D94));
-            NeonButton.drawSmallText(ctx, textRenderer, cat.title, winX + 21, cy + 4, selected ? 0xFFF4F4FC : (hovered ? 0xFFD4D4E6 : 0xFF9494AA), 0.80f);
+            drawCategoryIcon(ctx, cat, winX + 10, cy + 2, selected ? accB : (hovered ? 0xFFB8B8CE : 0xFF7D7D94));
+            NeonButton.drawSmallText(ctx, textRenderer, cat.title, winX + 20, cy + 3, selected ? 0xFFF4F4FC : (hovered ? 0xFFD4D4E6 : 0xFF9494AA), 0.76f);
 
-            if (cat.badge && sideW >= 96) {
-                int bx = winX + sideW - 29;
-                NeonButton.fillSmoothRounded(ctx, bx, cy + 3, 20, 8, 2, 0xFF262632);
-                NeonButton.drawSmallText(ctx, textRenderer, "FPS", bx + 3, cy + 4, 0xFF9E9EB6, 0.65f);
+            if (cat.badge != null && sideW >= 100) {
+                int bw = Math.round(textRenderer.getWidth(cat.badge) * 0.62f) + 6;
+                int bx = winX + sideW - bw - 8;
+                NeonButton.fillSmoothRounded(ctx, bx, cy + 2, bw, 8, 2, 0xFF262632);
+                NeonButton.drawSmallText(ctx, textRenderer, cat.badge, bx + 3, cy + 3, 0xFF9E9EB6, 0.62f);
             }
-            cy += 15;
+            cy += 13;
         }
 
-        int py = winY + winH - 24;
+        int py = winY + winH - 22;
         ctx.fill(winX + 7, py - 3, winX + sideW - 7, py - 2, 0x14FFFFFF);
         MinecraftClient mc = MinecraftClient.getInstance();
         String nick = (mc != null && mc.player != null) ? mc.player.getName().getString() : "Player";
@@ -422,16 +530,16 @@ public class ArtemScreen extends Screen {
 
         int ax = winX + 8;
         int ay = py + 1;
-        NeonButton.fillSmoothRounded(ctx, ax, ay, 15, 15, 3, 0xFF23232E);
+        NeonButton.fillSmoothRounded(ctx, ax, ay, 14, 14, 3, 0xFF23232E);
         if (mc != null && mc.player instanceof AbstractClientPlayerEntity p) {
-            PlayerSkinDrawer.draw(ctx, p.getSkinTextures().texture(), ax + 1, ay + 1, 13);
+            PlayerSkinDrawer.draw(ctx, p.getSkinTextures().texture(), ax + 1, ay + 1, 12);
         } else {
             NeonButton.drawCircle(ctx, ax + 7, ay + 7, 4, accB);
         }
 
-        NeonButton.drawSmallText(ctx, textRenderer, nick, ax + 18, ay + 1, 0xFFEAEAF6, 0.78f);
-        NeonButton.drawSmallText(ctx, textRenderer, "Fabric 1.21", ax + 18, ay + 9, 0xFF6E6E84, 0.68f);
-        drawGearIcon(ctx, winX + sideW - 16, ay + 3, 0xFF7D7D94);
+        NeonButton.drawSmallText(ctx, textRenderer, nick, ax + 17, ay + 1, 0xFFEAEAF6, 0.76f);
+        NeonButton.drawSmallText(ctx, textRenderer, "Fabric 1.21", ax + 17, ay + 8, 0xFF6E6E84, 0.66f);
+        drawGearIcon(ctx, winX + sideW - 15, ay + 3, 0xFF7D7D94);
     }
 
     private void renderMainHeader(DrawContext ctx, int mouseX, int mouseY, int acc, int accB) {
@@ -461,8 +569,8 @@ public class ArtemScreen extends Screen {
 
         ctx.fill(mainX + 1, winY + 23, winX + winW - 1, winY + 24, 0x16FFFFFF);
 
-        int pillY = winY + 28;
-        String pillText = (subDetailTitle != null && searchQuery.isBlank()) ? "Параметры модуля" : "Функции";
+        int pillY = winY + 27;
+        String pillText = (subDetailTitle != null && searchQuery.isBlank()) ? "Параметры модуля" : activeCategory.subPill;
         int pw = Math.round(textRenderer.getWidth(pillText) * 0.78f) + 10;
         NeonButton.fillSmoothRounded(ctx, hx, pillY, pw, 11, 3, 0xFF21212B);
         NeonButton.drawSmallText(ctx, textRenderer, pillText, hx + 5, pillY + 2, 0xFFD4D4E6, 0.78f);
@@ -500,6 +608,11 @@ public class ArtemScreen extends Screen {
     }
 
     private void renderSingleRow(DrawContext ctx, RowItem item, int x, int y, int w, int h, boolean hovered, int acc, int accB) {
+        if (item instanceof HeaderLabelRow hl) {
+            NeonButton.drawSmallText(ctx, textRenderer, hl.title(), x + 2, y + 3, 0xFF7E7E96, 0.78f);
+            return;
+        }
+
         NeonButton.fillSmoothRounded(ctx, x, y, w, h, 4, hovered ? 0xFF22222C : 0xFF1C1C24);
         NeonButton.drawSmoothRoundedOutline(ctx, x, y, w, h, 4, hovered ? 0x20FFFFFF : 0x10FFFFFF);
 
@@ -579,8 +692,8 @@ public class ArtemScreen extends Screen {
         }
 
         int sx = winX + 7;
-        int sy = winY + 24;
-        if (mouseX >= sx && mouseX <= sx + sideW - 14 && mouseY >= sy && mouseY <= sy + 14) {
+        int sy = winY + 23;
+        if (mouseX >= sx && mouseX <= sx + sideW - 14 && mouseY >= sy && mouseY <= sy + 13) {
             searchFocused = true;
             if (button == 1) searchQuery = "";
             return true;
@@ -588,7 +701,7 @@ public class ArtemScreen extends Screen {
             searchFocused = false;
         }
 
-        int py = winY + winH - 24;
+        int py = winY + winH - 22;
         if (mouseX >= winX + sideW - 20 && mouseX <= winX + sideW - 4 && mouseY >= py && mouseY <= winY + winH - 4) {
             activeCategory = Category.THEMES;
             searchQuery = "";
@@ -597,14 +710,14 @@ public class ArtemScreen extends Screen {
             return true;
         }
 
-        int cy = winY + 44;
+        int cy = winY + 41;
         String lastGroup = "";
         for (Category cat : Category.values()) {
             if (!cat.group.equals(lastGroup)) {
                 lastGroup = cat.group;
-                cy += 9;
+                cy += 8;
             }
-            if (mouseX >= winX + 6 && mouseX <= winX + sideW - 6 && mouseY >= cy && mouseY <= cy + 14) {
+            if (mouseX >= winX + 6 && mouseX <= winX + sideW - 6 && mouseY >= cy && mouseY <= cy + 12) {
                 activeCategory = cat;
                 searchQuery = "";
                 subDetailTitle = null;
@@ -612,7 +725,7 @@ public class ArtemScreen extends Screen {
                 scrollOffset = 0;
                 return true;
             }
-            cy += 15;
+            cy += 13;
         }
 
         if (subDetailTitle != null && mouseX >= mainX + 8 && mouseX <= winX + winW - 26 && mouseY >= winY + 4 && mouseY <= winY + 23) {
@@ -760,6 +873,13 @@ public class ArtemScreen extends Screen {
 
     private void drawCategoryIcon(DrawContext ctx, Category cat, int x, int y, int col) {
         switch (cat) {
+            case MAIN -> drawHomeIcon(ctx, x, y, col);
+            case HELPERS -> drawStarLogo(ctx, x, y, col);
+            case AUCTION -> {
+                ctx.fill(x + 1, y + 2, x + 6, y + 6, col);
+                ctx.fill(x + 2, y + 1, x + 5, y + 2, col);
+            }
+            case OPTIMIZE -> drawGearIcon(ctx, x, y, col);
             case VISUALS -> {
                 ctx.fill(x + 1, y + 2, x + 6, y + 5, col);
                 ctx.fill(x + 3, y + 3, x + 4, y + 4, 0xFF111116);
@@ -770,17 +890,22 @@ public class ArtemScreen extends Screen {
                 ctx.fill(x, y + 1, x + 1, y + 6, col);
                 ctx.fill(x + 6, y + 1, x + 7, y + 6, col);
             }
-            case SWORD -> {
-                ctx.fill(x + 5, y, x + 7, y + 2, col);
-                ctx.fill(x + 3, y + 2, x + 5, y + 4, col);
-                ctx.fill(x + 1, y + 4, x + 3, y + 6, col);
-            }
-            case OPTIMIZE -> drawGearIcon(ctx, x, y, col);
-            case WORLD -> NeonButton.drawCircle(ctx, x + 3, y + 3, 3, col);
             case CONFIGS -> {
                 ctx.fill(x + 1, y, x + 6, y + 7, col);
                 ctx.fill(x + 2, y + 2, x + 5, y + 3, 0xFF111116);
             }
+            case FRIENDS -> {
+                ctx.fill(x + 1, y + 1, x + 3, y + 3, col);
+                ctx.fill(x + 4, y + 1, x + 6, y + 3, col);
+                ctx.fill(x, y + 4, x + 4, y + 6, col);
+                ctx.fill(x + 4, y + 4, x + 7, y + 6, col);
+            }
+            case EVENTS -> {
+                ctx.fill(x + 1, y + 1, x + 6, y + 6, col);
+                ctx.fill(x + 3, y + 2, x + 4, y + 4, 0xFF111116);
+                ctx.fill(x + 3, y + 4, x + 5, y + 5, 0xFF111116);
+            }
+            case WAYPOINTS -> NeonButton.drawCircle(ctx, x + 3, y + 3, 3, col);
             case THEMES -> {
                 ctx.fill(x + 1, y + 1, x + 6, y + 6, col);
                 ctx.fill(x + 2, y + 2, x + 3, y + 3, 0xFF111116);
