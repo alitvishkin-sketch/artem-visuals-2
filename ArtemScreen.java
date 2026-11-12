@@ -34,12 +34,12 @@ public class ArtemScreen extends Screen {
     private record SubSwatches(String label, int[] palette, IntSupplier getter, IntConsumer setter) implements SubItem {}
 
     private static final int[] ACCENT_PALETTE = {
-            0xFF7B68EE, 0xFF00F5FF, 0xFFFF4D8D, 0xFF2EC4B6,
+            0xFF8A7CFF, 0xFF00F5FF, 0xFFFF4D8D, 0xFF2EC4B6,
             0xFFFFB703, 0xFFFF595E, 0xFF6BCB77, 0xFFFFFFFF
     };
 
     private static final int[] BG_PALETTE = {
-            0x0C0C12, 0x0A101E, 0x160C1E, 0x0A1916,
+            0x101018, 0x0A101E, 0x160C1E, 0x0A1916,
             0x1C0C12, 0x050507
     };
 
@@ -64,14 +64,12 @@ public class ArtemScreen extends Screen {
         NeonButton.syncTheme();
         ArtemConfig c = ArtemConfig.get();
 
-        // Компактное окно с учётом масштаба
         float s = Math.max(0.70f, Math.min(1.15f, c.guiScale));
         winW = Math.min(width - 16, Math.round(336 * s));
         winH = Math.min(height - 16, Math.round(212 * s));
         winX = (width - winW) / 2;
         winY = (height - winH) / 2;
 
-        // Левый док с 4 вкладками
         int dockX = winX + 6;
         int dockY = winY + 26;
         Tab[] tabs = Tab.values();
@@ -93,7 +91,6 @@ public class ArtemScreen extends Screen {
             ));
         }
 
-        // Кнопка закрытия
         addDrawableChild(new NeonButton(
                 winX + winW - 20, winY + 5, 14, 14,
                 () -> "X", null,
@@ -163,7 +160,6 @@ public class ArtemScreen extends Screen {
                 items.add(toggleCard("Item ESP", () -> c.itemEsp, () -> { c.itemEsp = !c.itemEsp; c.save(); }, null));
             }
             case HUD -> {
-                // Прямое управление цветом HUD (работает мгновенно!)
                 items.add(NeonButton.swatches(0, 0, colW, 18, "Цвет HUD", ACCENT_PALETTE,
                         () -> c.hudAccentColor,
                         col -> {
@@ -189,7 +185,7 @@ public class ArtemScreen extends Screen {
                             c.save();
                             NeonButton.syncTheme();
                         }));
-                items.add(NeonButton.slider(0, 0, colW, 18, "Масштаб HUD", 0.45, 1.20, false,
+                items.add(NeonButton.slider(0, 0, colW, 18, "Масштаб HUD", 0.50, 1.20, false,
                         () -> c.hudScale,
                         val -> {
                             c.hudScale = (float) val;
@@ -209,19 +205,20 @@ public class ArtemScreen extends Screen {
                     c.hudPositions.clear();
                     c.save();
                 }));
-                items.add(new NeonButton(0, 0, colW, 18, () -> "Пресет Pulse", null, HudManager::applyPulsePreset));
+                items.add(new NeonButton(0, 0, colW, 18, () -> "Пресет Andromeda", null, HudManager::applyPulsePreset));
 
-                items.add(toggleCard("Top Bar (IP/FPS)", () -> c.showServer, () -> { c.showServer = !c.showServer; c.save(); }, null));
+                items.add(toggleCard("Top Bar (Время)", () -> c.showServer, () -> { c.showServer = !c.showServer; c.save(); }, null));
+                items.add(toggleCard("Inventory HUD", () -> c.showInventory, () -> { c.showInventory = !c.showInventory; c.save(); }, null));
+                items.add(toggleCard("Potion Effects", () -> c.showPotions, () -> { c.showPotions = !c.showPotions; c.save(); }, null));
+                items.add(toggleCard("Keybinds", () -> c.showHotKeys, () -> { c.showHotKeys = !c.showHotKeys; c.save(); }, null));
+                items.add(toggleCard("Paperdoll (Модель)", () -> c.showPaperdoll, () -> { c.showPaperdoll = !c.showPaperdoll; c.save(); }, null));
                 items.add(toggleCard("TargetHUD", () -> c.showTargetHud, () -> { c.showTargetHud = !c.showTargetHud; c.save(); }, null));
-                items.add(toggleCard("Hot Keys", () -> c.showHotKeys, () -> { c.showHotKeys = !c.showHotKeys; c.save(); }, null));
-                items.add(toggleCard("Potions", () -> c.showPotions, () -> { c.showPotions = !c.showPotions; c.save(); }, null));
-                items.add(toggleCard("Armor", () -> c.showArmor, () -> { c.showArmor = !c.showArmor; c.save(); }, null));
+                items.add(toggleCard("Armor (Броня)", () -> c.showArmor, () -> { c.showArmor = !c.showArmor; c.save(); }, null));
+                items.add(toggleCard("Armor % (Цифры)", () -> c.armorDurabilityPercent, () -> { c.armorDurabilityPercent = !c.armorDurabilityPercent; c.save(); }, null));
                 items.add(toggleCard("ArrayList", () -> c.showArrayList, () -> { c.showArrayList = !c.showArrayList; c.save(); }, null));
                 items.add(toggleCard("Keystrokes", () -> c.showKeystrokes, () -> { c.showKeystrokes = !c.showKeystrokes; c.save(); }, null));
                 items.add(toggleCard("Radar", () -> c.showRadar, () -> { c.showRadar = !c.showRadar; c.save(); }, null));
                 items.add(toggleCard("MiniMap", () -> c.showMinimap, () -> { c.showMinimap = !c.showMinimap; c.save(); }, null));
-                items.add(toggleCard("FPS", () -> c.showFps, () -> { c.showFps = !c.showFps; c.save(); }, null));
-                items.add(toggleCard("Ping", () -> c.showPing, () -> { c.showPing = !c.showPing; c.save(); }, null));
                 items.add(toggleCard("XYZ", () -> c.showXyz, () -> { c.showXyz = !c.showXyz; c.save(); }, null));
                 items.add(toggleCard("Speed (BPS)", () -> c.showSpeed, () -> { c.showSpeed = !c.showSpeed; c.save(); }, null));
                 items.add(toggleCard("CPS", () -> c.showCps, () -> { c.showCps = !c.showCps; c.save(); }, null));
@@ -238,6 +235,7 @@ public class ArtemScreen extends Screen {
                 items.add(NeonButton.slider(0, 0, colW, 18, "Сдвиг Z", -0.40, 0.40, false,
                         () -> c.swordOffsetZ, v -> { c.swordOffsetZ = (float) v; c.save(); }));
 
+                items.add(toggleCard("Hand Aura (Свечение)", () -> c.handGlow, () -> { c.handGlow = !c.handGlow; c.save(); }, null));
                 items.add(toggleCard("No HurtCam", () -> c.noHurtCam, () -> { c.noHurtCam = !c.noHurtCam; c.save(); }, null));
                 items.add(toggleCard("Low Fire", () -> c.lowFire, () -> { c.lowFire = !c.lowFire; c.save(); }, null));
                 items.add(toggleCard("Виньетка экрана", () -> c.screenVignette, () -> { c.screenVignette = !c.screenVignette; c.save(); }, null));
@@ -313,7 +311,6 @@ public class ArtemScreen extends Screen {
             addDrawableChild(btn);
         }
 
-        // Выдвижная подпанель настроек справа
         if (subW > 0) {
             int sx = winX + winW - subW - 6;
             int sy = contentY + 16;
@@ -348,22 +345,18 @@ public class ArtemScreen extends Screen {
         NeonButton.syncTheme();
         renderBackground(ctx, mouseX, mouseY, delta);
 
-        // Главное компактное окно
         NeonButton.drawAmbientGlow(ctx, winX, winY, winW, winH, 7, NeonButton.ACCENT, 2);
         NeonButton.fillGradientRounded(ctx, winX, winY, winW, winH, 7, NeonButton.WINDOW_TOP, NeonButton.WINDOW_BOTTOM);
         NeonButton.drawSmoothRoundedOutline(ctx, winX, winY, winW, winH, 7, 0x26FFFFFF);
 
-        // Разделитель левого дока
         ctx.fill(winX + 29, winY + 22, winX + 30, winY + winH - 6, 0x18FFFFFF);
         ctx.fill(winX + 6, winY + 21, winX + winW - 6, winY + 22, 0x18FFFFFF);
 
-        // Заголовок
         NeonButton.drawCircle(ctx, winX + 12, winY + 12, 3, NeonButton.ACCENT_BRIGHT);
         NeonButton.drawSmallText(ctx, textRenderer, "ARTEM VISUALS", winX + 19, winY + 8, 0xFFF4F4FC, 0.90f);
         String sub = " | " + currentTab.title + "  [Zoom: C]";
         NeonButton.drawSmallText(ctx, textRenderer, sub, winX + 86, winY + 8, NeonButton.ACCENT_BRIGHT, 0.85f);
 
-        // Подпанель справа
         if (subTitle != null && !subItems.isEmpty()) {
             int subW = 112;
             int sx = winX + winW - subW - 6;
