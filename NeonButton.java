@@ -17,12 +17,13 @@ import java.util.function.IntSupplier;
 import java.util.function.Supplier;
 
 /**
- * UI-компоненты в стиле PulseVisual: скруглённые карточки, пилюли-тумблеры, слайдеры, RGB и выбор цвета.
+ * UI-компоненты в стиле PulseVisual: чёткая типографика 1.0f, плавные пилюли-тумблеры и кастомизация цвета окна.
  */
 public class NeonButton extends ClickableWidget {
     public enum Style {
         TOGGLE,
         SLIDER,
+        HUE_SLIDER,
         COLOR_SWATCHES,
         ACTION,
         DOCK_ICON,
@@ -50,10 +51,15 @@ public class NeonButton extends ClickableWidget {
     private float hoverAnim = 0f;
     private float toggleAnim = -1f;
 
-    public static int ACCENT = 0xFF6C5CE7;
-    public static int ACCENT_BRIGHT = 0xFF9D8DF7;
-    public static final int TEXT = 0xFFE6E6F2;
-    public static final int TEXT_DIM = 0xFF56566C;
+    public static int ACCENT = 0xFF7B68EE;
+    public static int ACCENT_BRIGHT = 0xFFA495FF;
+    public static int WINDOW_TOP = 0xF00E0E15;
+    public static int WINDOW_BOTTOM = 0xF00A0A0F;
+    public static int CARD_OFF = 0xCC13131C;
+    public static int CARD_ON = 0xE6181824;
+
+    public static final int TEXT = 0xFFE8E8F4;
+    public static final int TEXT_DIM = 0xFF606076;
     public static final int TEXT_ON = 0xFFFFFFFF;
 
     public NeonButton(int x, int y, int w, int h, Supplier<String> label, BooleanSupplier state, Runnable action) {
@@ -76,27 +82,53 @@ public class NeonButton extends ClickableWidget {
     public static void syncTheme() {
         ArtemConfig c = ArtemConfig.get();
         if (c.rgbMode) {
-            float hue = ((System.currentTimeMillis() % 4000L) / 4000f * c.rgbSpeed) % 1.0f;
-            int rgb = Color.HSBtoRGB(hue, 0.72f, 0.96f);
+            float hue = ((System.currentTimeMillis() % 4500L) / 4500f * c.rgbSpeed) % 1.0f;
+            int rgb = Color.HSBtoRGB(hue, 0.68f, 0.96f);
+            setClientAccent(0xFF000000 | (rgb & 0x00FFFFFF));
+        } else if (c.useCustomHue) {
+            int rgb = Color.HSBtoRGB(c.customHue, 0.68f, 0.96f);
             setClientAccent(0xFF000000 | (rgb & 0x00FFFFFF));
         } else {
             setClientAccent(c.clientAccent);
         }
+
+        int base = c.windowBgColor & 0x00FFFFFF;
+        int alpha = Math.max(140, Math.min(252, Math.round(c.windowAlpha * 255f)));
+        int r1 = Math.min(255, ((base >> 16) & 0xFF) + 4);
+        int g1 = Math.min(255, ((base >> 8) & 0xFF) + 4);
+        int b1 = Math.min(255, (base & 0xFF) + 6);
+        WINDOW_TOP = (alpha << 24) | (r1 << 16) | (g1 << 8) | b1;
+        WINDOW_BOTTOM = (alpha << 24) | base;
+
+        int cr = Math.min(255, ((base >> 16) & 0xFF) + 9);
+        int cg = Math.min(255, ((base >> 8) & 0xFF) + 9);
+        int cb = Math.min(255, (base & 0xFF) + 13);
+        CARD_OFF = (Math.min(245, alpha) << 24) | (cr << 16) | (cg << 8) | cb;
+
+        int onR = Math.min(255, cr + 7);
+        int onG = Math.min(255, cg + 7);
+        int onB = Math.min(255, cb + 10);
+        CARD_ON = (Math.min(250, alpha) << 24) | (onR << 16) | (onG << 8) | onB;
     }
 
     public static int getDynamicColor(int baseColor, int offsetMs) {
         ArtemConfig c = ArtemConfig.get();
-        if (!c.rgbMode) return baseColor;
-        float hue = (((System.currentTimeMillis() + offsetMs) % 4000L) / 4000f * c.rgbSpeed) % 1.0f;
-        int rgb = Color.HSBtoRGB(hue, 0.72f, 0.98f);
-        return 0xFF000000 | (rgb & 0x00FFFFFF);
+        if (c.rgbMode) {
+            float hue = (((System.currentTimeMillis() + offsetMs) % 4500L) / 4500f * c.rgbSpeed) % 1.0f;
+            int rgb = Color.HSBtoRGB(hue, 0.68f, 0.98f);
+            return 0xFF000000 | (rgb & 0x00FFFFFF);
+        }
+        if (c.useCustomHue) {
+            return ACCENT;
+        }
+        return baseColor;
     }
 
     public static void setClientAccent(int primary) {
         ACCENT = primary;
-        int r = Math.min(255, ((primary >> 16) & 0xFF) + 46);
-        int g = Math.min(255, ((primary >> 8) & 0xFF) + 46);
-        int b = Math.min(255, (primary & 0xFF) + 46);
+        int r = Math.min(255, ((primary >> 16) & 0xFF) + 42);
+        int g = Math.min(255, ((primary >> 8) & 0xFF) + 42);
+        int b = Math.min(255, (primary & 0xFF) + 42);
         ACCENT_BRIGHT = 0xFF000000 | (r << 16) | (g << 8) | b;
     }
 
@@ -107,6 +139,17 @@ public class NeonButton extends ClickableWidget {
         b.sliderMin = min;
         b.sliderMax = max;
         b.sliderInteger = integer;
+        b.sliderGet = get;
+        b.sliderSet = set;
+        return b;
+    }
+
+    public static NeonButton hueSlider(int x, int y, int w, int h, String title,
+                                       DoubleSupplier get, DoubleConsumer set) {
+        NeonButton b = new NeonButton(x, y, w, h, () -> title, null, () -> {}, Style.HUE_SLIDER, 0);
+        b.sliderMin = 0.0;
+        b.sliderMax = 1.0;
+        b.sliderInteger = false;
         b.sliderGet = get;
         b.sliderSet = set;
         return b;
@@ -140,65 +183,78 @@ public class NeonButton extends ClickableWidget {
         if (style == Style.CLOSE_ICON) {
             int bg = hover ? 0x88FF4D6D : 0x16FFFFFF;
             fillSmoothRounded(ctx, x, y, w, h, 4, bg);
-            drawSmallText(ctx, tr, "✕", x + w / 2f - 2.2f, y + (h - 6) / 2f, hover ? 0xFFFFFFFF : TEXT_DIM, 0.8f);
+            ctx.drawCenteredTextWithShadow(tr, "✕", x + w / 2, y + (h - 8) / 2, hover ? 0xFFFFFFFF : TEXT_DIM);
             return;
         }
 
         if (style == Style.DOCK_ICON) {
             boolean active = state != null && state.getAsBoolean();
             if (active) {
-                drawAmbientGlow(ctx, x, y, w, h, 5, ACCENT, 2);
-                fillGradientRounded(ctx, x, y, w, h, 5, ACCENT_BRIGHT, ACCENT);
-                drawSmoothRoundedOutline(ctx, x, y, w, h, 5, 0x55FFFFFF);
+                drawAmbientGlow(ctx, x, y, w, h, 6, ACCENT, 2);
+                fillGradientRounded(ctx, x, y, w, h, 6, ACCENT_BRIGHT, ACCENT);
+                drawSmoothRoundedOutline(ctx, x, y, w, h, 6, 0x55FFFFFF);
             } else {
-                int bg = hover ? 0x26FFFFFF : 0x10FFFFFF;
-                fillSmoothRounded(ctx, x, y, w, h, 5, bg);
+                int bg = hover ? 0x24FFFFFF : 0x10FFFFFF;
+                fillSmoothRounded(ctx, x, y, w, h, 6, bg);
             }
-            drawDockGlyph(ctx, x + w / 2, y + h / 2, iconIndex, active ? 0xFFFFFFFF : (hover ? 0xFFD0D0E4 : 0xFF6E6E88));
+            drawDockGlyph(ctx, x + w / 2, y + h / 2, iconIndex, active ? 0xFFFFFFFF : (hover ? 0xFFD4D4E8 : 0xFF6C6C84));
             return;
         }
 
-        if (style == Style.SLIDER) {
+        if (style == Style.SLIDER || style == Style.HUE_SLIDER) {
             double val = sliderGet != null ? sliderGet.getAsDouble() : sliderMin;
             double ratio = (sliderMax > sliderMin) ? Math.max(0.0, Math.min(1.0, (val - sliderMin) / (sliderMax - sliderMin))) : 0.0;
-            String valStr = sliderInteger ? String.valueOf((int) Math.round(val)) : String.format("%.2f", val);
+            String valStr = style == Style.HUE_SLIDER
+                    ? Math.round(ratio * 360) + "°"
+                    : (sliderInteger ? String.valueOf((int) Math.round(val)) : String.format("%.2f", val));
 
-            drawSmallText(ctx, tr, rawText, x + 1, y + 1, hover || draggingSlider ? TEXT_ON : TEXT, 0.82f);
-            int vw = Math.round(tr.getWidth(valStr) * 0.82f);
-            drawSmallText(ctx, tr, valStr, x + w - vw - 2, y + 1, ACCENT_BRIGHT, 0.82f);
+            ctx.drawText(tr, rawText, x + 1, y + 1, hover || draggingSlider ? TEXT_ON : TEXT, false);
+            int vw = tr.getWidth(valStr);
+            ctx.drawText(tr, valStr, x + w - vw - 1, y + 1, ACCENT_BRIGHT, false);
 
-            int barX = x + 2;
-            int barY = y + h - 4;
-            int barW = w - 4;
-            int barH = 2;
+            int barX = x + 1;
+            int barY = y + h - 5;
+            int barW = w - 2;
+            int barH = 3;
 
-            fillSmoothRounded(ctx, barX, barY, barW, barH, 1, 0xFF232334);
-            int fillW = (int) Math.round(barW * ratio);
-            if (fillW > 1) {
-                fillGradientRounded(ctx, barX, barY, fillW, barH, 1, ACCENT, ACCENT_BRIGHT);
+            if (style == Style.HUE_SLIDER) {
+                int segs = 24;
+                for (int i = 0; i < segs; i++) {
+                    int sx1 = barX + (barW * i) / segs;
+                    int sx2 = barX + (barW * (i + 1)) / segs;
+                    int col = 0xFF000000 | (Color.HSBtoRGB(i / (float) segs, 0.78f, 0.98f) & 0x00FFFFFF);
+                    ctx.fill(sx1, barY, sx2, barY + barH, col);
+                }
+            } else {
+                fillSmoothRounded(ctx, barX, barY, barW, barH, 1, 0xFF232334);
+                int fillW = (int) Math.round(barW * ratio);
+                if (fillW > 1) {
+                    fillGradientRounded(ctx, barX, barY, fillW, barH, 1, ACCENT, ACCENT_BRIGHT);
+                }
             }
 
-            int kx = barX + fillW;
+            int kx = barX + (int) Math.round(barW * ratio);
             int ky = barY + 1;
-            drawCircle(ctx, kx, ky, 4, (ACCENT & 0x00FFFFFF) | 0x44000000);
-            drawCircle(ctx, kx, ky, 2, 0xFFFFFFFF);
+            drawCircle(ctx, kx, ky, 4, (ACCENT & 0x00FFFFFF) | 0x55000000);
+            drawCircle(ctx, kx, ky, 3, 0xFFFFFFFF);
             return;
         }
 
         if (style == Style.COLOR_SWATCHES && swatchPalette != null) {
-            drawSmallText(ctx, tr, rawText, x + 1, y + 3, TEXT, 0.82f);
+            ctx.drawText(tr, rawText, x + 1, y + 3, TEXT, false);
             int current = swatchGet != null ? swatchGet.getAsInt() : swatchPalette[0];
             int count = swatchPalette.length;
-            int r = 4;
-            int spacing = 12;
+            int r = 5;
+            int spacing = 13;
             int startX = x + w - (count - 1) * spacing - r - 2;
-            int cy = y + 6;
+            int cy = y + 7;
             for (int col : swatchPalette) {
-                if (col == current) {
+                int fullCol = 0xFF000000 | (col & 0x00FFFFFF);
+                if ((col & 0x00FFFFFF) == (current & 0x00FFFFFF)) {
                     drawCircle(ctx, startX, cy, r + 2, 0x66FFFFFF);
                     drawCircle(ctx, startX, cy, r + 1, 0xFFFFFFFF);
                 }
-                drawCircle(ctx, startX, cy, r, col);
+                drawCircle(ctx, startX, cy, r, fullCol);
                 startX += spacing;
             }
             return;
@@ -208,82 +264,93 @@ public class NeonButton extends ClickableWidget {
         boolean on = isToggle && state.getAsBoolean();
 
         if (isToggle) {
+            // Карточка модуля в стиле PulseVisual
             if (on) {
-                fillGradientRounded(ctx, x, y, w, h, 5, hover ? 0xF5191828 : 0xEB131320, hover ? 0xF512121E : 0xEB0E0E18);
-                drawSmoothRoundedOutline(ctx, x, y, w, h, 5, hover ? ((ACCENT_BRIGHT & 0x00FFFFFF) | 0x66000000) : ((ACCENT & 0x00FFFFFF) | 0x30000000));
+                fillSmoothRounded(ctx, x, y, w, h, 6, hover ? lighten(CARD_ON, 6) : CARD_ON);
+                drawSmoothRoundedOutline(ctx, x, y, w, h, 6,
+                        hover ? ((ACCENT_BRIGHT & 0x00FFFFFF) | 0x55000000) : ((ACCENT & 0x00FFFFFF) | 0x28000000));
             } else {
-                fillSmoothRounded(ctx, x, y, w, h, 5, hover ? 0xD813131D : 0xB80D0D15);
-                drawSmoothRoundedOutline(ctx, x, y, w, h, 5, hover ? 0x22FFFFFF : 0x10FFFFFF);
+                fillSmoothRounded(ctx, x, y, w, h, 6, hover ? lighten(CARD_OFF, 5) : CARD_OFF);
+                drawSmoothRoundedOutline(ctx, x, y, w, h, 6, hover ? 0x1EFFFFFF : 0x0EFFFFFF);
             }
 
             if (toggleAnim < 0f) toggleAnim = on ? 1f : 0f;
             toggleAnim += ((on ? 1f : 0f) - toggleAnim) * 0.30f;
 
-            String cleanName = rawText.replace(": ВКЛ", "").replace(": ВЫКЛ", "");
+            // Чёткий нативный текст 1.0f как в PulseVisual
             int labelCol = on ? TEXT_ON : (hover ? 0xFF8C8CA4 : TEXT_DIM);
-            drawSmallText(ctx, tr, cleanName, x + 7, y + (h - 7) / 2f, labelCol, 0.85f);
+            ctx.drawText(tr, rawText, x + 10, y + (h - 8) / 2, labelCol, false);
 
-            int tw = 20;
-            int th = 10;
-            int tx = x + w - tw - 5;
+            // Плавный тумблер-пилюля справа
+            int tw = 24;
+            int th = 12;
+            int tx = x + w - tw - 8;
             int ty = y + (h - th) / 2;
 
             if (on) {
-                drawAmbientGlow(ctx, tx, ty, tw, th, 5, ACCENT, 1);
-                fillGradientRounded(ctx, tx, ty, tw, th, 5, ACCENT, ACCENT_BRIGHT);
+                drawAmbientGlow(ctx, tx, ty, tw, th, 6, ACCENT, 2);
+                fillGradientRounded(ctx, tx, ty, tw, th, 6, ACCENT, ACCENT_BRIGHT);
             } else {
-                fillSmoothRounded(ctx, tx, ty, tw, th, 5, 0xFF1C1C28);
-                drawSmoothRoundedOutline(ctx, tx, ty, tw, th, 5, 0x18FFFFFF);
+                fillSmoothRounded(ctx, tx, ty, tw, th, 6, 0xFF1E1E2B);
+                drawSmoothRoundedOutline(ctx, tx, ty, tw, th, 6, 0x16FFFFFF);
             }
 
-            int travel = tw - 10;
-            int kcx = tx + 5 + Math.round(travel * toggleAnim);
+            int travel = tw - 12;
+            int kcx = tx + 6 + Math.round(travel * toggleAnim);
             int kcy = ty + th / 2;
-            drawCircle(ctx, kcx, kcy, 3, on ? 0xFFFFFFFF : 0xFF686880);
+            drawCircle(ctx, kcx, kcy, 4, on ? 0xFFFFFFFF : 0xFF6B6B82);
         } else {
-            fillGradientRounded(ctx, x, y, w, h, 5, hover ? 0xF51B1A2B : 0xEB131320, hover ? 0xF5131320 : 0xEB0E0E18);
-            drawSmoothRoundedOutline(ctx, x, y, w, h, 5, hover ? ((ACCENT_BRIGHT & 0x00FFFFFF) | 0x55000000) : 0x1CFFFFFF);
+            fillSmoothRounded(ctx, x, y, w, h, 6, hover ? lighten(CARD_ON, 6) : CARD_OFF);
+            drawSmoothRoundedOutline(ctx, x, y, w, h, 6,
+                    hover ? ((ACCENT_BRIGHT & 0x00FFFFFF) | 0x55000000) : 0x18FFFFFF);
 
             int colonIdx = rawText.indexOf(':');
             if (colonIdx > 0 && colonIdx < rawText.length() - 1) {
                 String k = rawText.substring(0, colonIdx + 1);
                 String v = rawText.substring(colonIdx + 1).trim();
-                drawSmallText(ctx, tr, k, x + 7, y + (h - 7) / 2f, 0xFF9A9AB2, 0.84f);
-                int vw = Math.round(tr.getWidth(v) * 0.84f);
-                drawSmallText(ctx, tr, v, x + w - vw - 7, y + (h - 7) / 2f, ACCENT_BRIGHT, 0.84f);
+                ctx.drawText(tr, k, x + 9, y + (h - 8) / 2, 0xFF9A9AB2, false);
+                int vw = tr.getWidth(v);
+                ctx.drawText(tr, v, x + w - vw - 9, y + (h - 8) / 2, ACCENT_BRIGHT, false);
             } else {
-                float tw = tr.getWidth(rawText) * 0.84f;
-                drawSmallText(ctx, tr, rawText, x + (w - tw) / 2f, y + (h - 7) / 2f, hover ? TEXT_ON : TEXT, 0.84f);
+                ctx.drawCenteredTextWithShadow(tr, rawText, x + w / 2, y + (h - 8) / 2, hover ? TEXT_ON : TEXT);
             }
         }
     }
 
+    private static int lighten(int argb, int add) {
+        int a = (argb >> 24) & 0xFF;
+        int r = Math.min(255, ((argb >> 16) & 0xFF) + add);
+        int g = Math.min(255, ((argb >> 8) & 0xFF) + add);
+        int b = Math.min(255, (argb & 0xFF) + add);
+        return (a << 24) | (r << 16) | (g << 8) | b;
+    }
+
     private void drawDockGlyph(DrawContext ctx, int cx, int cy, int idx, int col) {
         switch (idx) {
-            case 0 -> { // Visual
+            case 0 -> {
                 drawCircle(ctx, cx, cy, 4, col);
                 drawCircle(ctx, cx, cy, 2, 0xFF141422);
                 ctx.fill(cx, cy, cx + 1, cy + 1, col);
             }
-            case 1 -> { // HUD
+            case 1 -> {
                 fillSmoothRounded(ctx, cx - 4, cy - 4, 3, 3, 1, col);
                 fillSmoothRounded(ctx, cx + 1, cy - 4, 3, 3, 1, col);
                 fillSmoothRounded(ctx, cx - 4, cy + 1, 3, 3, 1, col);
                 fillSmoothRounded(ctx, cx + 1, cy + 1, 3, 3, 1, col);
             }
-            case 2 -> { // Crosshair
+            case 2 -> {
                 ctx.fill(cx, cy - 4, cx + 1, cy - 1, col);
                 ctx.fill(cx, cy + 2, cx + 1, cy + 5, col);
                 ctx.fill(cx - 4, cy, cx - 1, cy + 1, col);
                 ctx.fill(cx + 2, cy, cx + 5, cy + 1, col);
                 ctx.fill(cx, cy, cx + 1, cy + 1, col);
             }
-            case 3 -> { // FunTime / Perf
+            case 3 -> {
                 ctx.fill(cx, cy - 4, cx + 2, cy, col);
                 ctx.fill(cx - 3, cy - 1, cx + 4, cy + 1, col);
                 ctx.fill(cx - 1, cy, cx + 1, cy + 4, col);
             }
-            default -> { // Settings & Configs
+            default -> {
                 fillSmoothRounded(ctx, cx - 4, cy - 3, 4, 2, 1, col);
                 fillSmoothRounded(ctx, cx - 4, cy - 2, 8, 6, 1, col);
             }
@@ -292,8 +359,8 @@ public class NeonButton extends ClickableWidget {
 
     private void updateSliderFromMouse(double mouseX) {
         if (sliderSet == null) return;
-        double barX = getX() + 2;
-        double barW = Math.max(1, width - 4);
+        double barX = getX() + 1;
+        double barW = Math.max(1, width - 2);
         double ratio = Math.max(0.0, Math.min(1.0, (mouseX - barX) / barW));
         double raw = sliderMin + ratio * (sliderMax - sliderMin);
         if (sliderInteger) {
@@ -307,7 +374,7 @@ public class NeonButton extends ClickableWidget {
     @Override
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
         if (!active || !visible || !isMouseOver(mouseX, mouseY)) return false;
-        if (style == Style.SLIDER && button == 0) {
+        if ((style == Style.SLIDER || style == Style.HUE_SLIDER) && button == 0) {
             draggingSlider = true;
             updateSliderFromMouse(mouseX);
             playDownSound(MinecraftClient.getInstance().getSoundManager());
@@ -315,8 +382,8 @@ public class NeonButton extends ClickableWidget {
         }
         if (style == Style.COLOR_SWATCHES && button == 0 && swatchPalette != null && swatchSet != null) {
             int count = swatchPalette.length;
-            int r = 4;
-            int spacing = 12;
+            int r = 5;
+            int spacing = 13;
             int startX = getX() + width - (count - 1) * spacing - r - 2;
             for (int col : swatchPalette) {
                 if (Math.abs(mouseX - startX) <= 6) {
@@ -343,7 +410,7 @@ public class NeonButton extends ClickableWidget {
 
     @Override
     public boolean mouseDragged(double mouseX, double mouseY, int button, double deltaX, double deltaY) {
-        if (style == Style.SLIDER && draggingSlider && button == 0) {
+        if ((style == Style.SLIDER || style == Style.HUE_SLIDER) && draggingSlider && button == 0) {
             updateSliderFromMouse(mouseX);
             return true;
         }
@@ -352,7 +419,7 @@ public class NeonButton extends ClickableWidget {
 
     @Override
     public boolean mouseReleased(double mouseX, double mouseY, int button) {
-        if (style == Style.SLIDER && draggingSlider && button == 0) {
+        if ((style == Style.SLIDER || style == Style.HUE_SLIDER) && draggingSlider && button == 0) {
             draggingSlider = false;
             return true;
         }
@@ -360,6 +427,10 @@ public class NeonButton extends ClickableWidget {
     }
 
     public static void drawSmallText(DrawContext ctx, TextRenderer tr, String text, float x, float y, int color, float scale) {
+        if (Math.abs(scale - 1.0f) < 0.02f) {
+            ctx.drawText(tr, text, Math.round(x), Math.round(y), color, false);
+            return;
+        }
         ctx.getMatrices().push();
         ctx.getMatrices().translate(x, y, 0);
         ctx.getMatrices().scale(scale, scale, 1f);
@@ -430,7 +501,7 @@ public class NeonButton extends ClickableWidget {
     public static void drawAmbientGlow(DrawContext ctx, int x, int y, int w, int h, int r, int baseColor, int layers) {
         int rgb = baseColor & 0x00FFFFFF;
         for (int i = 1; i <= layers; i++) {
-            int alpha = Math.max(8, 30 - i * 10);
+            int alpha = Math.max(8, 28 - i * 9);
             int glowCol = (alpha << 24) | rgb;
             drawSmoothRoundedOutline(ctx, x - i, y - i, w + i * 2, h + i * 2, r + i, glowCol);
         }
