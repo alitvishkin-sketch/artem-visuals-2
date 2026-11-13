@@ -44,7 +44,7 @@ public class ArtemVisualsClient implements ClientModInitializer {
 
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             while (openMenuKey.wasPressed()) {
-                client.setScreen(new ArtemScreen(client.currentScreen));
+                client.setScreen(new ModernMenuScreen(client.currentScreen));
             }
             EffectManager.tick(client);
             handleCpsAndHudDrag(client);
