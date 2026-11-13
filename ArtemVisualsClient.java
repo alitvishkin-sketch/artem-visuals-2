@@ -4,6 +4,7 @@ import com.artem.visuals.config.ArtemConfig;
 import com.artem.visuals.crosshair.CrosshairRenderer;
 import com.artem.visuals.effects.EffectManager;
 import com.artem.visuals.gui.ArtemScreen;
+import com.artem.visuals.gui.ModernMenuScreen;
 import com.artem.visuals.hud.HudManager;
 import com.artem.visuals.optimize.Optimizer;
 import net.fabricmc.api.ClientModInitializer;
