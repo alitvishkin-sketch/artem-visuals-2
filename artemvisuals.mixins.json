@@ -10,9 +10,6 @@
   ],
   "injectors": {
     "defaultRequire": 1
-  }
+  },
+  "refmap": "artem-visuals-refmap.json"
 }
-"client": [
-    "InGameHudMixin",
-    "HeldItemRendererMixin"
-  ]
