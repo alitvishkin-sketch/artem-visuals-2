@@ -23,7 +23,7 @@ jobs:
           mv fabric.mod.json artemvisuals.mixins.json src/main/resources/
           mv icon.png src/main/resources/assets/artemvisuals/
           mv en_us.json ru_ru.json src/main/resources/assets/artemvisuals/lang/
-          mv inter.json inter_bold.json inter-medium.otf inter-semibold.otf src/main/resources/assets/artemvisuals/font/
+          mv inter.json inter_bold.json inter-medium.ttf inter-semibold.ttf src/main/resources/assets/artemvisuals/font/
       - uses: actions/setup-java@v4
         with:
           java-version: '21'
