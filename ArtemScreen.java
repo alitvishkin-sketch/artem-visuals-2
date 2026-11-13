@@ -11,7 +11,10 @@ import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.network.AbstractClientPlayerEntity;
 import net.minecraft.client.network.PlayerListEntry;
 import net.minecraft.client.util.InputUtil;
+import net.minecraft.client.util.math.MatrixStack;
+import net.minecraft.text.Style;
 import net.minecraft.text.Text;
+import net.minecraft.util.Identifier;
 import net.minecraft.util.math.BlockPos;
 import org.lwjgl.glfw.GLFW;
 
@@ -72,7 +75,14 @@ public class ArtemScreen extends Screen {
             0x1D0E14, 0x08080C
     };
 
+    // Шрифт Inter (assets/artemvisuals/font/inter.json)
+    private static final Identifier INTER = Identifier.of("artemvisuals", "inter");
+    // Скругления
+    private static final int WIN_R = 10;
+    private static final int ROW_R = 6;
+
     private final Screen parent;
+    private final long openedAt = System.currentTimeMillis();
     private Category activeCategory = Category.MAIN;
     private String searchQuery = "";
     private boolean searchFocused = false;
@@ -95,6 +105,30 @@ public class ArtemScreen extends Screen {
     public ArtemScreen(Screen parent) {
         super(Text.literal("Artem Visuals"));
         this.parent = parent;
+    }
+
+    // ---------- шрифт ----------
+    private Text f(String s) {
+        return Text.literal(s).setStyle(Style.EMPTY.withFont(INTER));
+    }
+
+    private int tw(String s) {
+        return textRenderer.getWidth(f(s));
+    }
+
+    private void txt(DrawContext ctx, String s, int x, int y, int color, float scale) {
+        MatrixStack m = ctx.getMatrices();
+        m.push();
+        m.translate((float) x, (float) y, 0f);
+        m.scale(scale, scale, 1f);
+        ctx.drawText(textRenderer, f(s), 0, 0, color, false);
+        m.pop();
+    }
+
+    private float openProgress() {
+        float p = Math.min(1f, (System.currentTimeMillis() - openedAt) / 190f);
+        float inv = 1f - p;
+        return 1f - inv * inv * inv;
     }
 
     @Override
@@ -350,7 +384,7 @@ public class ArtemScreen extends Screen {
         if (!c.friends.isEmpty()) {
             all.add(new HeaderLabelRow("Добавленные друзья (" + c.friends.size() + ")", Category.FRIENDS));
             for (String f : new ArrayList<>(c.friends)) {
-                all.add(new ActionRow("★ " + f, Category.FRIENDS, () -> "Удалить", () -> {
+                all.add(new ActionRow("• " + f, Category.FRIENDS, () -> "Удалить", () -> {
                     c.friends.removeIf(x -> x.equalsIgnoreCase(f));
                     c.save();
                     toast("Удалён: " + f);
@@ -512,7 +546,8 @@ public class ArtemScreen extends Screen {
 
     @Override
     public void renderBackground(DrawContext ctx, int mouseX, int mouseY, float delta) {
-        ctx.fill(0, 0, width, height, 0x6A06060A);
+        int a = (int) (0x6A * openProgress());
+        ctx.fill(0, 0, width, height, (a << 24) | 0x06060A);
     }
 
     @Override
@@ -524,11 +559,19 @@ public class ArtemScreen extends Screen {
         int acc = NeonButton.ACCENT;
         int accB = NeonButton.ACCENT_BRIGHT;
 
-        NeonButton.drawAmbientGlow(ctx, winX, winY, winW, winH, 7, acc, 2);
-        NeonButton.fillSmoothRounded(ctx, winX, winY, winW, winH, 7, 0xF416161C);
-        NeonButton.fillSmoothRounded(ctx, winX, winY, sideW, winH, 7, 0xF8111116);
-        ctx.fill(mainX - 4, winY, mainX, winY + winH, 0xF8111116);
-        NeonButton.drawSmoothRoundedOutline(ctx, winX, winY, winW, winH, 7, 0x22FFFFFF);
+        // плавное появление окна (масштаб)
+        float sc = 0.94f + 0.06f * openProgress();
+        MatrixStack ms = ctx.getMatrices();
+        ms.push();
+        ms.translate(width / 2f, height / 2f, 0f);
+        ms.scale(sc, sc, 1f);
+        ms.translate(-width / 2f, -height / 2f, 0f);
+
+        NeonButton.drawAmbientGlow(ctx, winX, winY, winW, winH, WIN_R, acc, 2);
+        NeonButton.fillSmoothRounded(ctx, winX, winY, winW, winH, WIN_R, 0xF416161C);
+        NeonButton.fillSmoothRounded(ctx, winX, winY, sideW, winH, WIN_R, 0xF8111116);
+        ctx.fill(mainX - WIN_R, winY, mainX, winY + winH, 0xF8111116);
+        NeonButton.drawSmoothRoundedOutline(ctx, winX, winY, winW, winH, WIN_R, 0x22FFFFFF);
         ctx.fill(mainX, winY + 1, mainX + 1, winY + winH - 1, 0x16FFFFFF);
 
         renderSidebar(ctx, mouseX, mouseY, accB);
@@ -536,54 +579,56 @@ public class ArtemScreen extends Screen {
         renderRowsList(ctx, mouseX, mouseY, c, acc, accB);
 
         if (!statusToast.isEmpty() && System.currentTimeMillis() < statusToastUntil) {
-            int tw = textRenderer.getWidth(statusToast) + 12;
-            int tx = winX + winW - tw - 10;
+            int toastW = tw(statusToast) + 12;
+            int tx = winX + winW - toastW - 10;
             int ty = winY + winH - 19;
-            NeonButton.fillSmoothRounded(ctx, tx, ty, tw, 13, 4, 0xEE1E1E28);
-            NeonButton.drawSmoothRoundedOutline(ctx, tx, ty, tw, 13, 4, (accB & 0x00FFFFFF) | 0x88000000);
-            NeonButton.drawSmallText(ctx, textRenderer, statusToast, tx + 6, ty + 3, accB, 0.80f);
+            NeonButton.fillSmoothRounded(ctx, tx, ty, toastW, 13, 5, 0xEE1E1E28);
+            NeonButton.drawSmoothRoundedOutline(ctx, tx, ty, toastW, 13, 5, (accB & 0x00FFFFFF) | 0x88000000);
+            txt(ctx, statusToast, tx + 6, ty + 3, accB, 0.80f);
         }
+
+        ms.pop();
     }
 
     private void renderSidebar(DrawContext ctx, int mouseX, int mouseY, int accB) {
         int lx = winX + 11;
         int ly = winY + 10;
         drawStarLogo(ctx, lx, ly, accB);
-        NeonButton.drawSmallText(ctx, textRenderer, "Artem", lx + 12, ly - 2, 0xFFF4F4FC, 0.95f);
+        txt(ctx, "Artem", lx + 12, ly - 2, 0xFFF4F4FC, 0.95f);
 
         int sx = winX + 7;
         int sy = winY + 23;
         int sw = sideW - 14;
-        NeonButton.fillSmoothRounded(ctx, sx, sy, sw, 13, 4, searchFocused ? 0xFF1E1E28 : 0xFF181820);
-        NeonButton.drawSmoothRoundedOutline(ctx, sx, sy, sw, 13, 4, searchFocused ? ((accB & 0x00FFFFFF) | 0x88000000) : 0x18FFFFFF);
+        NeonButton.fillSmoothRounded(ctx, sx, sy, sw, 13, 5, searchFocused ? 0xFF1E1E28 : 0xFF181820);
+        NeonButton.drawSmoothRoundedOutline(ctx, sx, sy, sw, 13, 5, searchFocused ? ((accB & 0x00FFFFFF) | 0x88000000) : 0x18FFFFFF);
         drawSearchIcon(ctx, sx + 5, sy + 3, 0xFF7A7A90);
 
         String shownSearch = searchQuery.isEmpty()
                 ? (searchFocused ? "|" : "Поиск...")
                 : (searchQuery + (searchFocused && (System.currentTimeMillis() / 500) % 2 == 0 ? "|" : ""));
-        NeonButton.drawSmallText(ctx, textRenderer, shownSearch, sx + 14, sy + 3, searchQuery.isEmpty() ? 0xFF6E6E84 : 0xFFEAEAF6, 0.76f);
+        txt(ctx, shownSearch, sx + 14, sy + 3, searchQuery.isEmpty() ? 0xFF6E6E84 : 0xFFEAEAF6, 0.76f);
 
         int cy = winY + 41;
         String lastGroup = "";
         for (Category cat : Category.values()) {
             if (!cat.group.equals(lastGroup)) {
                 lastGroup = cat.group;
-                NeonButton.drawSmallText(ctx, textRenderer, lastGroup, winX + 9, cy, 0xFF646478, 0.70f);
+                txt(ctx, lastGroup, winX + 9, cy, 0xFF646478, 0.70f);
                 cy += 8;
             }
             boolean selected = searchQuery.isBlank() && activeCategory == cat;
             boolean hovered = mouseX >= winX + 6 && mouseX <= winX + sideW - 6 && mouseY >= cy && mouseY <= cy + 12;
-            if (selected) NeonButton.fillSmoothRounded(ctx, winX + 6, cy, sideW - 12, 12, 3, 0xFF21212B);
-            else if (hovered) NeonButton.fillSmoothRounded(ctx, winX + 6, cy, sideW - 12, 12, 3, 0x881C1C24);
+            if (selected) NeonButton.fillSmoothRounded(ctx, winX + 6, cy, sideW - 12, 12, 4, 0xFF21212B);
+            else if (hovered) NeonButton.fillSmoothRounded(ctx, winX + 6, cy, sideW - 12, 12, 4, 0x881C1C24);
 
             drawCategoryIcon(ctx, cat, winX + 10, cy + 2, selected ? accB : (hovered ? 0xFFB8B8CE : 0xFF7D7D94));
-            NeonButton.drawSmallText(ctx, textRenderer, cat.title, winX + 20, cy + 3, selected ? 0xFFF4F4FC : (hovered ? 0xFFD4D4E6 : 0xFF9494AA), 0.76f);
+            txt(ctx, cat.title, winX + 20, cy + 3, selected ? 0xFFF4F4FC : (hovered ? 0xFFD4D4E6 : 0xFF9494AA), 0.76f);
 
             if (cat.badge != null && sideW >= 100) {
-                int bw = Math.round(textRenderer.getWidth(cat.badge) * 0.62f) + 6;
+                int bw = Math.round(tw(cat.badge) * 0.62f) + 6;
                 int bx = winX + sideW - bw - 8;
-                NeonButton.fillSmoothRounded(ctx, bx, cy + 2, bw, 8, 2, 0xFF262632);
-                NeonButton.drawSmallText(ctx, textRenderer, cat.badge, bx + 3, cy + 3, 0xFF9E9EB6, 0.62f);
+                NeonButton.fillSmoothRounded(ctx, bx, cy + 2, bw, 8, 3, 0xFF262632);
+                txt(ctx, cat.badge, bx + 3, cy + 3, 0xFF9E9EB6, 0.62f);
             }
             cy += 13;
         }
@@ -596,15 +641,15 @@ public class ArtemScreen extends Screen {
 
         int ax = winX + 8;
         int ay = py + 1;
-        NeonButton.fillSmoothRounded(ctx, ax, ay, 14, 14, 3, 0xFF23232E);
+        NeonButton.fillSmoothRounded(ctx, ax, ay, 14, 14, 4, 0xFF23232E);
         if (mc != null && mc.player instanceof AbstractClientPlayerEntity p) {
             PlayerSkinDrawer.draw(ctx, p.getSkinTextures().texture(), ax + 1, ay + 1, 12);
         } else {
             NeonButton.drawCircle(ctx, ax + 7, ay + 7, 4, accB);
         }
 
-        NeonButton.drawSmallText(ctx, textRenderer, nick, ax + 17, ay + 1, 0xFFEAEAF6, 0.76f);
-        NeonButton.drawSmallText(ctx, textRenderer, "Fabric 1.21", ax + 17, ay + 8, 0xFF6E6E84, 0.66f);
+        txt(ctx, nick, ax + 17, ay + 1, 0xFFEAEAF6, 0.76f);
+        txt(ctx, "Fabric 1.21", ax + 17, ay + 8, 0xFF6E6E84, 0.66f);
         drawGearIcon(ctx, winX + sideW - 15, ay + 3, 0xFF7D7D94);
     }
 
@@ -612,21 +657,21 @@ public class ArtemScreen extends Screen {
         int hx = mainX + 10;
         int hy = winY + 9;
         drawHomeIcon(ctx, hx, hy + 1, 0xFF8A8AA0);
-        NeonButton.drawSmallText(ctx, textRenderer, ">", hx + 11, hy + 1, 0xFF646478, 0.80f);
+        txt(ctx, ">", hx + 11, hy + 1, 0xFF646478, 0.80f);
 
         String title = !searchQuery.isBlank() ? ("Поиск: " + searchQuery) : activeCategory.title;
-        NeonButton.drawSmallText(ctx, textRenderer, title, hx + 19, hy + 1, 0xFFEAEAF6, 0.85f);
+        txt(ctx, title, hx + 19, hy + 1, 0xFFEAEAF6, 0.85f);
 
         if (searchQuery.isBlank() && subDetailTitle != null) {
-            int offset = 23 + Math.round(textRenderer.getWidth(title) * 0.85f);
-            NeonButton.drawSmallText(ctx, textRenderer, ">  " + subDetailTitle + " (назад)", hx + offset, hy + 1, accB, 0.82f);
+            int offset = 23 + Math.round(tw(title) * 0.85f);
+            txt(ctx, ">  " + subDetailTitle + " (назад)", hx + offset, hy + 1, accB, 0.82f);
         }
 
         int closeX = winX + winW - 18;
         int closeY = winY + 7;
         boolean closeHover = mouseX >= closeX && mouseX <= closeX + 12 && mouseY >= closeY && mouseY <= closeY + 12;
-        NeonButton.fillSmoothRounded(ctx, closeX, closeY, 12, 12, 3, closeHover ? 0x66FF4D6D : 0xFF1F1F28);
-        NeonButton.drawSmallText(ctx, textRenderer, "x", closeX + 4, closeY + 2, closeHover ? 0xFFFFFFFF : 0xFF9A9AB0, 0.80f);
+        NeonButton.fillSmoothRounded(ctx, closeX, closeY, 12, 12, 4, closeHover ? 0x66FF4D6D : 0xFF1F1F28);
+        txt(ctx, "x", closeX + 4, closeY + 2, closeHover ? 0xFFFFFFFF : 0xFF9A9AB0, 0.80f);
 
         int dotX = closeX - 10;
         NeonButton.drawCircle(ctx, dotX, winY + 13, 4, (acc & 0x00FFFFFF) | 0x88000000);
@@ -637,9 +682,9 @@ public class ArtemScreen extends Screen {
 
         int pillY = winY + 27;
         String pillText = (subDetailTitle != null && searchQuery.isBlank()) ? "Параметры модуля" : activeCategory.subPill;
-        int pw = Math.round(textRenderer.getWidth(pillText) * 0.78f) + 10;
-        NeonButton.fillSmoothRounded(ctx, hx, pillY, pw, 11, 3, 0xFF21212B);
-        NeonButton.drawSmallText(ctx, textRenderer, pillText, hx + 5, pillY + 2, 0xFFD4D4E6, 0.78f);
+        int pw = Math.round(tw(pillText) * 0.78f) + 10;
+        NeonButton.fillSmoothRounded(ctx, hx, pillY, pw, 11, 4, 0xFF21212B);
+        txt(ctx, pillText, hx + 5, pillY + 2, 0xFFD4D4E6, 0.78f);
     }
 
     private void renderRowsList(DrawContext ctx, int mouseX, int mouseY, ArtemConfig c, int acc, int accB) {
@@ -661,7 +706,7 @@ public class ArtemScreen extends Screen {
             ry += rh + 3;
         }
         if (rows.isEmpty()) {
-            NeonButton.drawSmallText(ctx, textRenderer, "Ничего не найдено", listX + 6, listY + 8, 0xFF7D7D94, 0.85f);
+            txt(ctx, "Ничего не найдено", listX + 6, listY + 8, 0xFF7D7D94, 0.85f);
         }
         ctx.disableScissor();
 
@@ -675,12 +720,12 @@ public class ArtemScreen extends Screen {
 
     private void renderSingleRow(DrawContext ctx, RowItem item, int x, int y, int w, int h, boolean hovered, int acc, int accB) {
         if (item instanceof HeaderLabelRow hl) {
-            NeonButton.drawSmallText(ctx, textRenderer, hl.title(), x + 2, y + 3, 0xFF7E7E96, 0.78f);
+            txt(ctx, hl.title(), x + 2, y + 3, 0xFF7E7E96, 0.78f);
             return;
         }
 
-        NeonButton.fillSmoothRounded(ctx, x, y, w, h, 4, hovered ? 0xFF22222C : 0xFF1C1C24);
-        NeonButton.drawSmoothRoundedOutline(ctx, x, y, w, h, 4, hovered ? 0x20FFFFFF : 0x10FFFFFF);
+        NeonButton.fillSmoothRounded(ctx, x, y, w, h, ROW_R, hovered ? 0xFF22222C : 0xFF1C1C24);
+        NeonButton.drawSmoothRoundedOutline(ctx, x, y, w, h, ROW_R, hovered ? 0x20FFFFFF : 0x10FFFFFF);
 
         if (item instanceof CrosshairStyleRow cs) {
             ArtemConfig c = ArtemConfig.get();
@@ -688,29 +733,29 @@ public class ArtemScreen extends Screen {
             String styleName = (st + 1) + "/8 • " + HudManager.CROSSHAIR_STYLE_NAMES[st];
 
             drawRowBulletIcon(ctx, x + 6, y + 7, accB);
-            NeonButton.drawSmallText(ctx, textRenderer, cs.label(), x + 16, y + 8, 0xFFD8D8EA, 0.80f);
+            txt(ctx, cs.label(), x + 16, y + 8, 0xFFD8D8EA, 0.80f);
 
-            int bw = Math.round(textRenderer.getWidth(styleName) * 0.76f) + 10;
+            int bw = Math.round(tw(styleName) * 0.76f) + 10;
             int bx = x + w - bw - 6;
-            NeonButton.fillSmoothRounded(ctx, bx, y + 5, bw, 12, 3, hovered ? acc : 0xFF262632);
-            NeonButton.drawSmallText(ctx, textRenderer, styleName, bx + 5, y + 8, hovered ? 0xFF121218 : accB, 0.76f);
+            NeonButton.fillSmoothRounded(ctx, bx, y + 5, bw, 12, 4, hovered ? acc : 0xFF262632);
+            txt(ctx, styleName, bx + 5, y + 8, hovered ? 0xFF121218 : accB, 0.76f);
 
             int prevBoxX = bx - 22;
-            NeonButton.fillSmoothRounded(ctx, prevBoxX, y + 3, 16, 16, 3, 0xFF121218);
-            NeonButton.drawSmoothRoundedOutline(ctx, prevBoxX, y + 3, 16, 16, 3, 0x22FFFFFF);
+            NeonButton.fillSmoothRounded(ctx, prevBoxX, y + 3, 16, 16, 4, 0xFF121218);
+            NeonButton.drawSmoothRoundedOutline(ctx, prevBoxX, y + 3, 16, 16, 4, 0x22FFFFFF);
             HudManager.renderCrosshairPreview(ctx, prevBoxX + 8.0f, y + 11.0f, st, c.crosshairColor);
         } else if (item instanceof ToggleRow tr) {
             boolean on = tr.getter().getAsBoolean();
             drawRowBulletIcon(ctx, x + 6, y + 5, on ? accB : 0xFF7D7D94);
-            NeonButton.drawSmallText(ctx, textRenderer, tr.label(), x + 16, y + 6, on ? 0xFFF2F2FA : 0xFFB8B8CC, 0.82f);
+            txt(ctx, tr.label(), x + 16, y + 6, on ? 0xFFF2F2FA : 0xFFB8B8CC, 0.82f);
 
             int rightX = x + w - 15;
             if (tr.onSettings() != null) {
-                NeonButton.drawSmallText(ctx, textRenderer, "ПКМ", rightX - 20, y + 6, 0xFF6E6E84, 0.70f);
+                txt(ctx, "ПКМ", rightX - 20, y + 6, 0xFF6E6E84, 0.70f);
             }
             int cbY = y + 4;
             if (on) {
-                NeonButton.fillSmoothRounded(ctx, rightX, cbY, 10, 10, 2, accB);
+                NeonButton.fillSmoothRounded(ctx, rightX, cbY, 10, 10, 3, accB);
                 ctx.fill(rightX + 2, cbY + 5, rightX + 3, cbY + 6, 0xFF121218);
                 ctx.fill(rightX + 3, cbY + 6, rightX + 4, cbY + 7, 0xFF121218);
                 ctx.fill(rightX + 4, cbY + 7, rightX + 5, cbY + 8, 0xFF121218);
@@ -718,17 +763,17 @@ public class ArtemScreen extends Screen {
                 ctx.fill(rightX + 6, cbY + 5, rightX + 7, cbY + 6, 0xFF121218);
                 ctx.fill(rightX + 7, cbY + 4, rightX + 8, cbY + 5, 0xFF121218);
             } else {
-                NeonButton.fillSmoothRounded(ctx, rightX, cbY, 10, 10, 2, 0xFF282834);
-                NeonButton.drawSmoothRoundedOutline(ctx, rightX, cbY, 10, 10, 2, 0x24FFFFFF);
+                NeonButton.fillSmoothRounded(ctx, rightX, cbY, 10, 10, 3, 0xFF282834);
+                NeonButton.drawSmoothRoundedOutline(ctx, rightX, cbY, 10, 10, 3, 0x24FFFFFF);
             }
         } else if (item instanceof SliderRow sr) {
             double val = sr.getter().getAsDouble();
             double norm = Math.max(0.0, Math.min(1.0, (val - sr.min()) / Math.max(0.0001, sr.max() - sr.min())));
             String valStr = sr.integer() ? String.valueOf(Math.round(val)) : String.format(Locale.US, "%.2f", val);
 
-            NeonButton.drawSmallText(ctx, textRenderer, sr.label(), x + 7, y + 4, 0xFFD4D4E6, 0.80f);
-            int vw = Math.round(textRenderer.getWidth(valStr) * 0.80f);
-            NeonButton.drawSmallText(ctx, textRenderer, valStr, x + w - vw - 7, y + 4, accB, 0.80f);
+            txt(ctx, sr.label(), x + 7, y + 4, 0xFFD4D4E6, 0.80f);
+            int vw = Math.round(tw(valStr) * 0.80f);
+            txt(ctx, valStr, x + w - vw - 7, y + 4, accB, 0.80f);
 
             int barX = x + 7;
             int barY = y + 16;
@@ -739,35 +784,35 @@ public class ArtemScreen extends Screen {
             NeonButton.drawCircle(ctx, barX + fillW, barY + 1, 3, 0xFFFFFFFF);
         } else if (item instanceof SwatchRow swr) {
             int cur = swr.getter().getAsInt() & 0x00FFFFFF;
-            NeonButton.drawSmallText(ctx, textRenderer, swr.label(), x + 7, y + 6, 0xFFD4D4E6, 0.80f);
+            txt(ctx, swr.label(), x + 7, y + 6, 0xFFD4D4E6, 0.80f);
             int[] pal = swr.palette();
             int startX = x + w - pal.length * 12 - 5;
             for (int i = 0; i < pal.length; i++) {
                 int sx = startX + i * 12;
                 int sy = y + 4;
                 int col = 0xFF000000 | (pal[i] & 0x00FFFFFF);
-                NeonButton.fillSmoothRounded(ctx, sx, sy, 9, 9, 2, col);
+                NeonButton.fillSmoothRounded(ctx, sx, sy, 9, 9, 4, col);
                 if ((pal[i] & 0x00FFFFFF) == cur) {
-                    NeonButton.drawSmoothRoundedOutline(ctx, sx - 1, sy - 1, 11, 11, 3, 0xFFFFFFFF);
+                    NeonButton.drawSmoothRoundedOutline(ctx, sx - 1, sy - 1, 11, 11, 5, 0xFFFFFFFF);
                 }
             }
         } else if (item instanceof KeybindRow kr) {
             boolean isListening = (listeningKeybind == kr);
             drawRowBulletIcon(ctx, x + 6, y + 5, isListening ? accB : 0xFF7D7D94);
-            NeonButton.drawSmallText(ctx, textRenderer, kr.label(), x + 16, y + 6, 0xFFD4D4E6, 0.80f);
+            txt(ctx, kr.label(), x + 16, y + 6, 0xFFD4D4E6, 0.80f);
             String badge = isListening ? "Нажмите клавишу..." : formatKeyName(kr.getter().getAsInt());
-            int bw = Math.round(textRenderer.getWidth(badge) * 0.78f) + 10;
+            int bw = Math.round(tw(badge) * 0.78f) + 10;
             int bx = x + w - bw - 6;
-            NeonButton.fillSmoothRounded(ctx, bx, y + 3, bw, 12, 3, isListening ? accB : (hovered ? acc : 0xFF262632));
-            NeonButton.drawSmallText(ctx, textRenderer, badge, bx + 5, y + 6, isListening ? 0xFF121218 : (hovered ? 0xFF121218 : accB), 0.78f);
+            NeonButton.fillSmoothRounded(ctx, bx, y + 3, bw, 12, 4, isListening ? accB : (hovered ? acc : 0xFF262632));
+            txt(ctx, badge, bx + 5, y + 6, isListening ? 0xFF121218 : (hovered ? 0xFF121218 : accB), 0.78f);
         } else if (item instanceof ActionRow ar) {
             drawRowBulletIcon(ctx, x + 6, y + 5, accB);
-            NeonButton.drawSmallText(ctx, textRenderer, ar.label(), x + 16, y + 6, 0xFFD4D4E6, 0.80f);
+            txt(ctx, ar.label(), x + 16, y + 6, 0xFFD4D4E6, 0.80f);
             String badge = ar.badgeText().get();
-            int bw = Math.round(textRenderer.getWidth(badge) * 0.78f) + 10;
+            int bw = Math.round(tw(badge) * 0.78f) + 10;
             int bx = x + w - bw - 6;
-            NeonButton.fillSmoothRounded(ctx, bx, y + 3, bw, 12, 3, hovered ? acc : 0xFF262632);
-            NeonButton.drawSmallText(ctx, textRenderer, badge, bx + 5, y + 6, hovered ? 0xFF121218 : accB, 0.78f);
+            NeonButton.fillSmoothRounded(ctx, bx, y + 3, bw, 12, 4, hovered ? acc : 0xFF262632);
+            txt(ctx, badge, bx + 5, y + 6, hovered ? 0xFF121218 : accB, 0.78f);
         }
     }
 
